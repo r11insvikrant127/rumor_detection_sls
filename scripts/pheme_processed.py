@@ -232,30 +232,40 @@ def create_dataset_summary(threads, event_veracity, output_dir):
             f"True={counts['true']} ({tr:.1f}%), "
             f"False={counts['false']} ({fr:.1f}%)"
         )
+        
+        ########################################################
+        # PAPER TABLE II STATISTICS CHECK
+        ########################################################
+        import numpy as np
 
-# # for comp only
+        print("\n==============================")
+        print("PAPER TABLE II VERIFICATION")
+        print("==============================")
 
- 
-# ############################################################
-# # MAIN
-# ############################################################
+        total_events = len(threads)
 
-# if __name__ == "__main__":
+        all_posts = []
+        all_users = set()
+        event_sizes = []
 
-#     print("=" * 70)
-#     print("PHEME DATASET BUILDER — BINARY VERACITY")
-#     print("=" * 70)
+        for t in threads:
+            tweets = t["tweets"]
+            event_sizes.append(len(tweets))
 
-#     raw_data_dir = Path(
-#         r"C:\Users\KIIT0001\rumor_detection_sls\phemernrdataset\pheme-rnr-dataset"
-#     )
+            for tw in tweets:
+                all_posts.append(tw["id"])
 
-#     output_dir = Path("data/processed/pheme_dataset")
+                user = tw.get("user", {})
+                if "id" in user:
+                    all_users.add(user["id"])
 
-#     threads = build_pheme_dataset(raw_data_dir, output_dir)
+        print(f"# of events          : {total_events}")
+        print(f"# of posts           : {len(all_posts)}")
+        print(f"# of users           : {len(all_users)}")
 
-#     print("\n✅ DATASET READY FOR TRAINING")
-
+        print(f"Avg # posts/event    : {np.mean(event_sizes):.2f}")
+        print(f"Max # posts/event    : {np.max(event_sizes)}")
+        print(f"Min # posts/event    : {np.min(event_sizes)}")
 
 
 ############################################################
