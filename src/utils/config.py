@@ -43,15 +43,6 @@ This file makes your whole pipeline paper-consistent.
 
 """
 
-"""
-Configuration management for PAPER-FAITHFUL SLS rumor detection system.
-
-Implements configuration described in:
-Wei et al., 2021 (IJCNN)
-"A Novel and High-Accuracy Rumor Detection Approach using
-Kernel Subtree and Deep Learning Networks"
-"""
-
 
 from __future__ import annotations
 
