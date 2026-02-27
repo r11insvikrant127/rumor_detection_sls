@@ -223,48 +223,48 @@ def load_config(config_path: Optional[str] = None) -> ConfigManager:
 
 
 
-"""
-What this file is used for
 
-This file is NOT training code and NOT the model.
+# What this file is used for
 
-It is a Configuration Manager.
+# This file is NOT training code and NOT the model.
 
-Think of it as the brain that tells every other file how to behave.
+# It is a Configuration Manager.
 
-What it controls in your system
+# Think of it as the brain that tells every other file how to behave.
 
-When you run:
+# What it controls in your system
 
-train.py
-predict.py
-main.py
+# When you run:
 
-they do something like:
+# train.py
+# predict.py
+# main.py
 
-config = ConfigManager("config.yaml")
+# they do something like:
 
-Then they read:
+# config = ConfigManager("config.yaml")
 
-config.model.input_dim
-config.loss.loss_type
-config.training.batch_size
-config.gbdt.threshold
+# Then they read:
 
-So this file defines:
+# config.model.input_dim
+# config.loss.loss_type
+# config.training.batch_size
+# config.gbdt.threshold
 
-Component	Controlled by this file
-Model architecture	input size, dropout, classes
-Loss function	circle loss params
-Training	LR, epochs, scheduler
-Feature usage	which features enabled
-Evaluation	metrics & outputs
-GBDT fallback	uncertainty rule
-Experiments	seeds & runs
+# So this file defines:
 
-👉 In short:
+# Component	Controlled by this file
+# Model architecture	input size, dropout, classes
+# Loss function	circle loss params
+# Training	LR, epochs, scheduler
+# Feature usage	which features enabled
+# Evaluation	metrics & outputs
+# GBDT fallback	uncertainty rule
+# Experiments	seeds & runs
 
-This file makes your whole pipeline paper-consistent.
+# 👉 In short:
 
-"""
+# This file makes your whole pipeline paper-consistent.
+
+
 
