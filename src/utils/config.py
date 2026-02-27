@@ -1,5 +1,49 @@
 from __future__ import annotations
 
+
+# What this file is used for
+
+# This file is NOT training code and NOT the model.
+
+# It is a Configuration Manager.
+
+# Think of it as the brain that tells every other file how to behave.
+
+# What it controls in your system
+
+# When you run:
+
+# train.py
+# predict.py
+# main.py
+
+# they do something like:
+
+# config = ConfigManager("config.yaml")
+
+# Then they read:
+
+# config.model.input_dim
+# config.loss.loss_type
+# config.training.batch_size
+# config.gbdt.threshold
+
+# So this file defines:
+
+# Component	Controlled by this file
+# Model architecture	input size, dropout, classes
+# Loss function	circle loss params
+# Training	LR, epochs, scheduler
+# Feature usage	which features enabled
+# Evaluation	metrics & outputs
+# GBDT fallback	uncertainty rule
+# Experiments	seeds & runs
+
+# 👉 In short:
+
+# This file makes your whole pipeline paper-consistent.
+
+
 import yaml
 import logging
 from dataclasses import dataclass, asdict
@@ -223,48 +267,6 @@ def load_config(config_path: Optional[str] = None) -> ConfigManager:
 
 
 
-
-# What this file is used for
-
-# This file is NOT training code and NOT the model.
-
-# It is a Configuration Manager.
-
-# Think of it as the brain that tells every other file how to behave.
-
-# What it controls in your system
-
-# When you run:
-
-# train.py
-# predict.py
-# main.py
-
-# they do something like:
-
-# config = ConfigManager("config.yaml")
-
-# Then they read:
-
-# config.model.input_dim
-# config.loss.loss_type
-# config.training.batch_size
-# config.gbdt.threshold
-
-# So this file defines:
-
-# Component	Controlled by this file
-# Model architecture	input size, dropout, classes
-# Loss function	circle loss params
-# Training	LR, epochs, scheduler
-# Feature usage	which features enabled
-# Evaluation	metrics & outputs
-# GBDT fallback	uncertainty rule
-# Experiments	seeds & runs
-
-# 👉 In short:
-
-# This file makes your whole pipeline paper-consistent.
 
 
 
