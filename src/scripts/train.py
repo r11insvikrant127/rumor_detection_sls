@@ -1,7 +1,7 @@
 """
 PAPER-EXACT SLS TRAINING SCRIPT
 5-Fold Cross Validation + Hybrid SLS-GBDT
-(Updated to use dataset_index.csv)
+(Updated to include propagation sanity check)
 """
 
 import sys
@@ -52,7 +52,7 @@ class RumorDetectionTrainer:
         print("✅ PAPER EXACT: Using 31 features")
 
     # -------------------------------------------------
-    # LOAD DATA FROM INDEX (NEW)
+    # LOAD DATA FROM INDEX
     # -------------------------------------------------
     def load_data_from_index(self, index_file):
 
@@ -61,6 +61,7 @@ class RumorDetectionTrainer:
         index_df = pd.read_csv(index_file)
 
         features, labels = [], []
+        graphs = []  # ← for sanity check
 
         print("Loading dataset using index file...")
 
@@ -83,6 +84,19 @@ class RumorDetectionTrainer:
 
                 event["tweets"] = tweets
 
+                # -------------------------------------------------
+                # BUILD PROPAGATION GRAPH (SANITY CHECK)
+                # -------------------------------------------------
+                graph = self.feature_extractor.tree_builder.build_from_tweets(
+                    tweets,
+                    source_id=str(event["source"]["id"])
+                )
+
+                graphs.append(graph)
+
+                # -------------------------------------------------
+                # FEATURE EXTRACTION
+                # -------------------------------------------------
                 feat = self.feature_extractor.extract_features(event)
 
                 features.append(feat)
@@ -99,10 +113,26 @@ class RumorDetectionTrainer:
         print(f"✅ Loaded dataset: {X.shape}")
         print(f"Rumors: {np.sum(y)} | Non-rumors: {len(y)-np.sum(y)}")
 
+        # =====================================================
+        # PROPAGATION SANITY CHECK
+        # =====================================================
+        print("\n🔎 PROPAGATION SANITY CHECK")
+
+        avg_nodes = np.mean([g.number_of_nodes() for g in graphs])
+
+        avg_depth = np.mean([
+            self.feature_extractor.tree_builder
+            .get_tree_metrics(g)["max_depth"]
+            for g in graphs
+        ])
+
+        print(f"Avg nodes/event : {avg_nodes:.2f}")
+        print(f"Avg max depth   : {avg_depth:.2f}")
+
         return X, y
 
     # -------------------------------------------------
-    # 5-FOLD CV (UNCHANGED — PAPER PROTOCOL)
+    # 5-FOLD CV (PAPER PROTOCOL)
     # -------------------------------------------------
     def train_cross_validation(self, X, y):
 
