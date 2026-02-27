@@ -81,7 +81,6 @@ data:
 # Evaluation configuration
 # ----------------------------------------------------------
 evaluation:
-  compute_feature_importance: false
   plot_confusion_matrix: true
   plot_roc_curve: true
   save_predictions: true
