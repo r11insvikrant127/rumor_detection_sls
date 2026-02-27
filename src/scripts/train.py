@@ -1,7 +1,7 @@
 """
 PAPER-EXACT SLS TRAINING SCRIPT
 5-Fold Cross Validation + Hybrid SLS-GBDT
-(Updated to include propagation sanity check)
+(FULLY PAPER-FAITHFUL VERSION)
 """
 
 import sys
@@ -11,6 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
 
+import json
 import numpy as np
 import torch
 import pandas as pd
@@ -43,6 +44,8 @@ class RumorDetectionTrainer:
         )
 
         self.feature_extractor = FeatureExtractor()
+
+        # Paper uses 31 features
         self.feature_names = list(
             self.feature_extractor.get_feature_names()
         )[:31]
@@ -56,14 +59,13 @@ class RumorDetectionTrainer:
     # -------------------------------------------------
     def load_data_from_index(self, index_file):
 
-        import json
-
         index_df = pd.read_csv(index_file)
 
-        features, labels = [], []
-        graphs = []  # ← for sanity check
+        features, labels, graphs = [], [], []
 
         print("Loading dataset using index file...")
+
+        skipped = 0
 
         for _, row in index_df.iterrows():
 
@@ -73,24 +75,44 @@ class RumorDetectionTrainer:
                 with open(file_path, "r", encoding="utf-8") as f:
                     event = json.load(f)
 
-                tweets = []
-                if "source" in event:
-                    tweets.append(event["source"])
-                if "replies" in event:
-                    tweets.extend(event["replies"])
-
-                if not tweets:
+                # =========================================
+                # PAPER REQUIREMENT:
+                # each event MUST have one source tweet
+                # =========================================
+                if (
+                    "source" not in event
+                    or event["source"] is None
+                    or "id" not in event["source"]
+                ):
+                    skipped += 1
                     continue
 
+                tweets = [event["source"]]
+
+                if "replies" in event and event["replies"]:
+                    tweets.extend(event["replies"])
+
+                if len(tweets) == 0:
+                    skipped += 1
+                    continue
+
+                # -------------------------------------------------
+                # IMPORTANT FIX (PAPER ALIGNMENT)
+                # -------------------------------------------------
                 event["tweets"] = tweets
+                event["source_id"] = str(event["source"]["id"])
 
                 # -------------------------------------------------
                 # BUILD PROPAGATION GRAPH (SANITY CHECK)
                 # -------------------------------------------------
-                graph = self.feature_extractor.tree_builder.build_from_tweets(
-                    tweets,
-                    source_id=str(event["source"]["id"])
-                )
+                try:
+                    graph = self.feature_extractor.tree_builder.build_from_tweets(
+                        tweets,
+                        source_id=event["source_id"]
+                    )
+                except Exception:
+                    skipped += 1
+                    continue
 
                 graphs.append(graph)
 
@@ -106,30 +128,33 @@ class RumorDetectionTrainer:
                 print(f"\n❌ Error processing file: {file_path}")
                 print("Reason:", e)
                 raise
-            
+
         X = np.array(features, dtype=np.float32)
         y = np.array(labels)
 
         X = np.nan_to_num(X)
 
-        print(f"✅ Loaded dataset: {X.shape}")
+        print(f"\n✅ Loaded dataset: {X.shape}")
         print(f"Rumors: {np.sum(y)} | Non-rumors: {len(y)-np.sum(y)}")
+        print(f"Skipped events: {skipped}")
 
         # =====================================================
         # PROPAGATION SANITY CHECK
         # =====================================================
         print("\n🔎 PROPAGATION SANITY CHECK")
 
-        avg_nodes = np.mean([g.number_of_nodes() for g in graphs])
+        if len(graphs) > 0:
+            avg_nodes = np.mean([g.number_of_nodes() for g in graphs])
+            avg_depth = np.mean([
+                self.feature_extractor.tree_builder
+                .get_tree_metrics(g)["max_depth"]
+                for g in graphs
+            ])
 
-        avg_depth = np.mean([
-            self.feature_extractor.tree_builder
-            .get_tree_metrics(g)["max_depth"]
-            for g in graphs
-        ])
-
-        print(f"Avg nodes/event : {avg_nodes:.2f}")
-        print(f"Avg max depth   : {avg_depth:.2f}")
+            print(f"Avg nodes/event : {avg_nodes:.2f}")
+            print(f"Avg max depth   : {avg_depth:.2f}")
+        else:
+            print("⚠ No graphs available for sanity check.")
 
         return X, y
 
@@ -155,12 +180,12 @@ class RumorDetectionTrainer:
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
 
-            # -------- Normalization --------
+            # -------- Normalization (Eq.2 paper) --------
             normalizer = FeatureNormalizer()
             X_train = normalizer.fit_transform(X_train, self.feature_names)
             X_val = normalizer.transform(X_val)
 
-            # -------- Train SLS --------
+            # -------- SLS Model --------
             model = PaperExactSLS(
                 input_dim=31,
                 lstm_hidden=128,
@@ -190,9 +215,9 @@ class RumorDetectionTrainer:
 
             trainer.train(train_loader, val_loader)
 
-            # -------- GBDT fallback --------
+            # -------- GBDT fallback (paper Section IV-F) --------
             print("🌳 Training GBDT fallback...")
-            gbdt = GradientBoostingClassifier()
+            gbdt = GradientBoostingClassifier(random_state=42)
             gbdt.fit(X_train, y_train)
 
             preds_sls, probs_sls = trainer.predict(
