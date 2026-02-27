@@ -275,16 +275,9 @@ def create_dataset_summary(threads, event_veracity, output_dir):
 
             user = tw.get("user")
 
-            # Case 1: normal tweet with user metadata
-            if user and "id" in user and user["id"] is not None:
-                uid = user["id"]
-
-            # Case 2: missing user info (VERY COMMON in PHEME)
-            else:
-                # create stable pseudo-user from tweet id
-                uid = f"unknown_user_{tw['id']}"
-
-            event_stats[event]["users"].add(uid)
+            # Count ONLY real users (paper-faithful)
+            if user and user.get("id") is not None:
+                event_stats[event]["users"].add(user["id"])
 
     # ----------------------------------------------------
     # Print Table (Paper Style)
