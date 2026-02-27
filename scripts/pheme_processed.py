@@ -234,38 +234,82 @@ def create_dataset_summary(threads, event_veracity, output_dir):
         )
         
         ########################################################
-        # PAPER TABLE II STATISTICS CHECK
+        # PAPER TABLE II STATISTICS (PER EVENT)
         ########################################################
         import numpy as np
+        from collections import defaultdict, Counter
 
-        print("\n==============================")
-        print("PAPER TABLE II VERIFICATION")
-        print("==============================")
+        print("\n===================================================")
+        print("PAPER TABLE II VERIFICATION (PER EVENT)")
+        print("===================================================")
 
-        total_events = len(threads)
+        # store statistics per event
+        event_stats = defaultdict(lambda: {
+            "posts": 0,
+            "users": set(),
+            "events": 0,
+            "true": 0,
+            "false": 0,
+            "event_sizes": []
+        })
 
-        all_posts = []
-        all_users = set()
-        event_sizes = []
+        # ----------------------------------------------------
+        # Collect statistics
+        # ----------------------------------------------------
+        for thread in threads:
 
-        for t in threads:
-            tweets = t["tweets"]
-            event_sizes.append(len(tweets))
+            event = thread["event_type"]
+            tweets = thread["tweets"]
+            label = thread["label"]
+
+            event_stats[event]["events"] += 1
+            event_stats[event]["posts"] += len(tweets)
+            event_stats[event]["event_sizes"].append(len(tweets))
+
+            if label == 1:
+                event_stats[event]["true"] += 1
+            else:
+                event_stats[event]["false"] += 1
 
             for tw in tweets:
-                all_posts.append(tw["id"])
-
                 user = tw.get("user", {})
                 if "id" in user:
-                    all_users.add(user["id"])
+                    event_stats[event]["users"].add(user["id"])
 
-        print(f"# of events          : {total_events}")
-        print(f"# of posts           : {len(all_posts)}")
-        print(f"# of users           : {len(all_users)}")
+        # ----------------------------------------------------
+        # Print Table (Paper Style)
+        # ----------------------------------------------------
+        header = (
+            f"{'Event':<15}"
+            f"{'#Posts':>10}"
+            f"{'#Users':>10}"
+            f"{'#Events':>10}"
+            f"{'True':>8}"
+            f"{'False':>8}"
+            f"{'AvgPosts':>12}"
+            f"{'MaxPosts':>12}"
+            f"{'MinPosts':>12}"
+        )
 
-        print(f"Avg # posts/event    : {np.mean(event_sizes):.2f}")
-        print(f"Max # posts/event    : {np.max(event_sizes)}")
-        print(f"Min # posts/event    : {np.min(event_sizes)}")
+        print("\n" + header)
+        print("-" * len(header))
+
+        for event in sorted(event_stats.keys()):
+
+            stats = event_stats[event]
+            sizes = stats["event_sizes"]
+
+            print(
+                f"{event:<15}"
+                f"{stats['posts']:>10}"
+                f"{len(stats['users']):>10}"
+                f"{stats['events']:>10}"
+                f"{stats['true']:>8}"
+                f"{stats['false']:>8}"
+                f"{np.mean(sizes):>12.2f}"
+                f"{np.max(sizes):>12}"
+                f"{np.min(sizes):>12}"
+            )
 
 
 ############################################################
