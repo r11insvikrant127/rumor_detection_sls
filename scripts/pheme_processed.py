@@ -233,9 +233,33 @@ def create_dataset_summary(threads, event_veracity, output_dir):
             f"False={counts['false']} ({fr:.1f}%)"
         )
 
+# # for comp only
+
+ 
+# ############################################################
+# # MAIN
+# ############################################################
+
+# if __name__ == "__main__":
+
+#     print("=" * 70)
+#     print("PHEME DATASET BUILDER — BINARY VERACITY")
+#     print("=" * 70)
+
+#     raw_data_dir = Path(
+#         r"C:\Users\KIIT0001\rumor_detection_sls\phemernrdataset\pheme-rnr-dataset"
+#     )
+
+#     output_dir = Path("data/processed/pheme_dataset")
+
+#     threads = build_pheme_dataset(raw_data_dir, output_dir)
+
+#     print("\n✅ DATASET READY FOR TRAINING")
+
+
 
 ############################################################
-# MAIN
+# MAIN(google colab)
 ############################################################
 
 if __name__ == "__main__":
@@ -244,11 +268,17 @@ if __name__ == "__main__":
     print("PHEME DATASET BUILDER — BINARY VERACITY")
     print("=" * 70)
 
-    raw_data_dir = Path(
-        r"C:\Users\KIIT0001\rumor_detection_sls\phemernrdataset\pheme-rnr-dataset"
-    )
+    # Project root (works on Windows, Linux, Colab)
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-    output_dir = Path("data/processed/pheme_dataset")
+    # Raw dataset location (relative path)
+    raw_data_dir = PROJECT_ROOT / "pheme-rnr-dataset"
+
+    # Output location
+    output_dir = PROJECT_ROOT / "data" / "processed" / "pheme_dataset"
+
+    print(f"\nRaw dataset path: {raw_data_dir}")
+    print(f"Output path: {output_dir}")
 
     threads = build_pheme_dataset(raw_data_dir, output_dir)
 
