@@ -89,13 +89,17 @@ def create_data_loader(
     features: np.ndarray,
     labels: np.ndarray,
     batch_size: int = 32,
-    shuffle: bool = True
+    shuffle: bool = True,
+    add_channel_dim: bool = True,    
 ) -> torch.utils.data.DataLoader:
     """
     Create DataLoader with required shape (N,1,L).
     """
 
-    x = torch.FloatTensor(features).unsqueeze(1)  # REQUIRED channel dim
+    x = torch.FloatTensor(features)
+
+    if add_channel_dim:
+        x = x.unsqueeze(1)
     y = torch.LongTensor(labels)
 
     dataset = torch.utils.data.TensorDataset(x, y)
