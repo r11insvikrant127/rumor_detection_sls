@@ -4,125 +4,75 @@ from typing import Dict, List, Tuple
 
 class KernelSubtreeExtractor:
     """
-    Extract kernel subtree from propagation tree for rumor detection.
+    PAPER-FAITHFUL kernel subtree extractor.
 
-    Strict implementation of SLS paper definition:
-    - Kernel = node with maximum TOTAL degree + its immediate children
-    - No multi-centrality combination
-    - No parent inclusion
-    - Only kernel_ratio feature (as per paper's Table I)
+    Paper definition:
+    Kernel subtree = node with maximum number of replies
+                     + its immediate children.
     """
 
-    def __init__(self, max_depth: int = None):
-        """
-        Initialize kernel extractor with optional depth constraint.
+    def __init__(self):
+        # Paper does NOT prune tree
+        pass
 
-        Args:
-            max_depth: Maximum depth to consider for kernel extraction.
-                       None means no pruning (use full tree).
-                       Set an integer only to apply temporal constraint.
-        """
-        self.max_depth = max_depth
-
+    # --------------------------------------------------
+    # MAIN API
+    # --------------------------------------------------
     def extract_kernel_subtree(
-        self, graph: nx.DiGraph, use_pruned: bool = True
+        self, graph: nx.DiGraph
     ) -> Tuple[str, List[str]]:
-        """
-        Extract kernel subtree strictly following paper definition.
 
-        Paper definition: Node with maximum degree + its children.
-
-        Args:
-            graph: Propagation tree graph
-            use_pruned: If True and max_depth is set, uses only nodes up to max_depth.
-
-        Returns:
-            Tuple of (max_degree_node, kernel_nodes_list)
-        """
         if graph.number_of_nodes() == 0:
             return None, []
 
-        # Apply depth constraint only if max_depth is explicitly set
-        if use_pruned and self.max_depth is not None:
-            working_graph = self._prune_to_max_depth(graph)
-        else:
-            working_graph = graph
-
-        if working_graph.number_of_nodes() == 0:
-            return None, []
-
-        max_node, kernel_nodes = self._paper_kernel_extraction(working_graph)
+        max_node, kernel_nodes = self._paper_kernel_extraction(graph)
         return max_node, kernel_nodes
 
-    def _prune_to_max_depth(self, graph: nx.DiGraph) -> nx.DiGraph:
+    # --------------------------------------------------
+    # PAPER-EXACT IMPLEMENTATION
+    # --------------------------------------------------
+    def _paper_kernel_extraction(
+        self, graph: nx.DiGraph
+    ) -> Tuple[str, List[str]]:
+
         """
-        Prune graph to include only nodes up to max_depth.
-
-        FIX: Now safely handles max_depth=None (returns full graph).
+        Paper (Section IV-B):
+        influential node = tweet with MOST responses.
         """
-        # Safety guard — should not be called with None, but defensive check
-        if self.max_depth is None:
-            return graph
 
-        nodes_to_keep = [
-            n for n, data in graph.nodes(data=True)
-            if data.get('depth', 0) <= self.max_depth
-        ]
-        return graph.subgraph(nodes_to_keep).copy()
+        # reply degree independent of edge direction
+        def reply_degree(node):
+            return max(
+                graph.out_degree(node),
+                graph.in_degree(node)
+            )
 
-    def _paper_kernel_extraction(self, graph: nx.DiGraph) -> Tuple[str, List[str]]:
-        """
-        Exact kernel extraction as defined in the paper.
+        max_node = max(graph.nodes(), key=reply_degree)
 
-        Paper: "Kernel subtree consists of the node with maximum degree
-               and its immediate children."
-
-        FIX: Uses total degree (in + out) instead of out_degree only,
-             which matches the paper's use of "degree" (not "out-degree").
-             Total degree better captures influence: a deeply-nested node
-             with many replies has both a parent edge (in) and reply edges (out).
-
-        Returns:
-            Tuple of (max_degree_node, kernel_nodes_list)
-        """
-        if graph.number_of_nodes() == 0:
-            return None, []
-        degrees = dict(graph.out_degree())
-        if not degrees:
-            return None, []
-
-        max_node = max(degrees.items(), key=lambda x: x[1])[0]
-
-        # Kernel = max node + its children (successors in directed graph)
-        kernel_nodes = {max_node}
-        kernel_nodes.update(graph.successors(max_node))
-
-        return max_node, list(kernel_nodes)
-
-    def get_kernel_metrics(self, graph: nx.DiGraph, kernel_nodes: List[str]) -> Dict:
-        """
-        Calculate ONLY the metrics defined in Table I of the paper.
-
-        Returns:
-            Dict with exactly the paper's features.
-        """
-        metrics = {}
-
-        # Use pruned graph only if max_depth is set
-        if self.max_depth is not None:
-            working_graph = self._prune_to_max_depth(graph)
+        # detect reply direction automatically
+        if graph.out_degree(max_node) >= graph.in_degree(max_node):
+            children = list(graph.successors(max_node))
         else:
-            working_graph = graph
+            children = list(graph.predecessors(max_node))
 
-        total_nodes = working_graph.number_of_nodes()
-        kernel_nodes_in_graph = [n for n in kernel_nodes if n in working_graph]
-        kernel_size = len(kernel_nodes_in_graph)
+        kernel_nodes = [max_node] + children
 
-        # Feature 2 from Table I: kernel_ratio
-        metrics['kernel_ratio'] = kernel_size / total_nodes if total_nodes > 0 else 0.0
+        return max_node, kernel_nodes
 
-        # Metadata (not features)
-        metrics['max_depth_constraint'] = self.max_depth
-        metrics['kernel_node'] = kernel_nodes[0] if kernel_nodes else None
+    # --------------------------------------------------
+    # METRICS (Feature 2)
+    # --------------------------------------------------
+    def get_kernel_metrics(
+        self,
+        graph: nx.DiGraph,
+        kernel_nodes: List[str]
+    ) -> Dict:
 
-        return metrics
+        total_nodes = graph.number_of_nodes()
+        kernel_size = len(kernel_nodes)
+
+        return {
+            "kernel_ratio":
+                kernel_size / total_nodes if total_nodes else 0.0,
+            "kernel_node": kernel_nodes[0] if kernel_nodes else None,
+        }
