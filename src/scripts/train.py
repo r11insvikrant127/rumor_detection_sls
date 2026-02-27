@@ -102,9 +102,11 @@ class RumorDetectionTrainer:
                 features.append(feat)
                 labels.append(int(row["label"]))
 
-            except Exception:
-                continue
-
+            except Exception as e:
+                print(f"\n❌ Error processing file: {file_path}")
+                print("Reason:", e)
+                raise
+            
         X = np.array(features, dtype=np.float32)
         y = np.array(labels)
 
