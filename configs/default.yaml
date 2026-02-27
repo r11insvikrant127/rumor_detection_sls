@@ -53,7 +53,6 @@ training:
   weight_decay: 1e-4
   grad_clip: 1.0
 
-  patience: 10
   early_stopping: true
   early_stopping_patience: 10
 
