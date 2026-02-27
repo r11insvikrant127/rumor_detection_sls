@@ -52,20 +52,6 @@ Wei et al., 2021 (IJCNN)
 Kernel Subtree and Deep Learning Networks"
 """
 
-"""
-Configuration Manager for PAPER-FAITHFUL SLS Rumor Detection System.
-
-This module controls how ALL components behave:
-- model architecture
-- training setup
-- loss configuration
-- evaluation
-- GBDT fallback
-- experiment tracking
-
-Paper:
-Wei et al., 2021 (IJCNN)
-"""
 
 from __future__ import annotations
 
