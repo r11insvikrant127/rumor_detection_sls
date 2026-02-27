@@ -338,5 +338,25 @@ if __name__ == "__main__":
     print(f"Output path: {output_dir}")
 
     threads = build_pheme_dataset(raw_data_dir, output_dir)
+    threads = build_pheme_dataset(raw_data_dir, output_dir)
+
+    # ---------------------------------------------------------
+    # DIAGNOSTIC: Missing user metadata check (Paper comparison)
+    # ---------------------------------------------------------
+    missing = 0
+    total = 0
+
+    for thread in threads:
+        for t in thread["tweets"]:
+            total += 1
+            if not (t.get("user") and t["user"].get("id")):
+                missing += 1
+
+    print("\n🔎 USER METADATA CHECK")
+    print("Total tweets:", total)
+    print("Tweets missing user info:", missing)
+    print("Missing user %:", missing / total)
+
+    print("\n✅ DATASET READY FOR TRAINING")
 
     print("\n✅ DATASET READY FOR TRAINING")
