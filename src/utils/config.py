@@ -52,12 +52,29 @@ Wei et al., 2021 (IJCNN)
 Kernel Subtree and Deep Learning Networks"
 """
 
+"""
+Configuration Manager for PAPER-FAITHFUL SLS Rumor Detection System.
+
+This module controls how ALL components behave:
+- model architecture
+- training setup
+- loss configuration
+- evaluation
+- GBDT fallback
+- experiment tracking
+
+Paper:
+Wei et al., 2021 (IJCNN)
+"""
+
+from __future__ import annotations
+
 import yaml
-import json
 import logging
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from dataclasses import dataclass, asdict
+from typing import Optional, Dict, Any
 from pathlib import Path
+from datetime import datetime
 
 
 # ============================================================
@@ -66,16 +83,13 @@ from pathlib import Path
 
 @dataclass
 class ModelConfig:
-    """SLS architecture configuration (paper)."""
-
-    input_dim: int = 31        # TABLE I features
+    input_dim: int = 31
     hidden_dim: int = 256
     lstm_hidden: int = 128
     dropout_rate: float = 0.15
     se_reduction: int = 16
     num_classes: int = 2
 
-    # Paper feature groups
     use_propagation_features: bool = True
     use_user_features: bool = True
     use_content_features: bool = True
@@ -87,8 +101,6 @@ class ModelConfig:
 
 @dataclass
 class LossConfig:
-    """Circle Loss configuration (paper)."""
-
     loss_type: str = "circle"
     margin: float = 0.25
     gamma: float = 256
@@ -106,8 +118,7 @@ class TrainingConfig:
     weight_decay: float = 1e-4
     grad_clip: float = 1.0
 
-    # Paper hybrid decision threshold
-    threshold: float = 0.57
+    threshold: float = 0.57  # Paper hybrid threshold
 
     scheduler: str = "plateau"
     scheduler_mode: str = "max"
@@ -150,7 +161,7 @@ class EvaluationConfig:
 
 
 # ============================================================
-# GBDT CONFIG (Section IV-F)
+# GBDT CONFIG
 # ============================================================
 
 @dataclass
@@ -176,7 +187,7 @@ class ExperimentConfig:
     experiment_name: str = "SLS_paper_faithful"
     experiment_id: Optional[str] = None
     seed: int = 42
-    num_runs: int = 5     # 5-fold CV (paper)
+    num_runs: int = 5
     save_checkpoints: bool = True
     checkpoint_dir: str = "checkpoints"
     log_dir: str = "logs"
@@ -190,13 +201,9 @@ class ConfigManager:
 
     def __init__(self, config_path: Optional[str] = None):
 
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger("ConfigManager")
 
-        if config_path and Path(config_path).exists():
-            with open(config_path, "r") as f:
-                config = yaml.safe_load(f)
-        else:
-            config = {}
+        config = self._load_yaml(config_path)
 
         self.model = ModelConfig(**config.get("model", {}))
         self.loss = LossConfig(**config.get("loss", {}))
@@ -206,7 +213,30 @@ class ConfigManager:
         self.gbdt = GBDTConfig(**config.get("gbdt", {}))
         self.experiment = ExperimentConfig(**config.get("experiment", {}))
 
+        # auto experiment id
+        if self.experiment.experiment_id is None:
+            self.experiment.experiment_id = datetime.now().strftime(
+                "%Y%m%d_%H%M%S"
+            )
+
         self._validate()
+
+    # --------------------------------------------------------
+
+    def _load_yaml(self, path: Optional[str]) -> Dict[str, Any]:
+
+        if path is None:
+            return {}
+
+        path = Path(path)
+
+        if not path.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+
+        with open(path, "r") as f:
+            data = yaml.safe_load(f) or {}
+
+        return data
 
     # --------------------------------------------------------
 
@@ -218,30 +248,37 @@ class ConfigManager:
             )
 
         if not (0 <= self.training.threshold <= 1):
-            raise ValueError("Threshold must be between 0 and 1")
+            raise ValueError("Training threshold must be in [0,1]")
+
+        if self.loss.loss_type != "circle":
+            raise ValueError("Paper requires Circle Loss")
+
+        if self.training.batch_size <= 0:
+            raise ValueError("Batch size must be positive")
 
     # --------------------------------------------------------
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
 
         return {
-            "model": self.model.__dict__,
-            "loss": self.loss.__dict__,
-            "training": self.training.__dict__,
-            "data": self.data.__dict__,
-            "evaluation": self.evaluation.__dict__,
-            "gbdt": self.gbdt.__dict__,
-            "experiment": self.experiment.__dict__,
+            "model": asdict(self.model),
+            "loss": asdict(self.loss),
+            "training": asdict(self.training),
+            "data": asdict(self.data),
+            "evaluation": asdict(self.evaluation),
+            "gbdt": asdict(self.gbdt),
+            "experiment": asdict(self.experiment),
         }
 
     # --------------------------------------------------------
 
     def save(self, path: str):
 
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f)
+            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
 
         self.logger.info(f"Config saved → {path}")
 
@@ -250,5 +287,5 @@ class ConfigManager:
 # HELPER
 # ============================================================
 
-def load_config(config_path: Optional[str] = None):
+def load_config(config_path: Optional[str] = None) -> ConfigManager:
     return ConfigManager(config_path)
