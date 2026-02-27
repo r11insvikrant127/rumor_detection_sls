@@ -179,11 +179,31 @@ class RumorDetectionTrainer:
 
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
+            
+            # =====================================================
+            # DEBUG 1 — RAW FEATURE STATS (before normalization)
+            # =====================================================
+            if fold == 1:   # print once only
+                print("\n[DEBUG] RAW FEATURES")
+                print("Train mean :", np.mean(X_train))
+                print("Train std  :", np.std(X_train))
+                print("Train min  :", np.min(X_train))
+                print("Train max  :", np.max(X_train))
 
             # -------- Normalization (Eq.2 paper) --------
             normalizer = FeatureNormalizer()
             X_train = normalizer.fit_transform(X_train, self.feature_names)
             X_val = normalizer.transform(X_val)
+            
+            # =====================================================
+            # DEBUG 2 — AFTER NORMALIZATION (CRITICAL)
+            # =====================================================
+            if fold == 1:
+                print("\n[DEBUG] NORMALIZED FEATURES")
+                print("Train mean :", np.mean(X_train))
+                print("Train std  :", np.std(X_train))
+                print("Train min  :", np.min(X_train))
+                print("Train max  :", np.max(X_train))
 
             # -------- SLS Model --------
             model = PaperExactSLS(
@@ -212,6 +232,16 @@ class RumorDetectionTrainer:
                 shuffle=False,
                 add_channel_dim=True
             )
+            
+            # =====================================================
+            # DEBUG 3 — BATCH ENTERING MODEL
+            # =====================================================
+            if fold == 1:
+                xb, yb = next(iter(train_loader))
+                print("\n[DEBUG] MODEL INPUT BATCH")
+                print("Tensor mean :", xb.mean().item())
+                print("Tensor std  :", xb.std().item())
+                print("Tensor shape:", xb.shape)
 
             trainer.train(train_loader, val_loader)
 
