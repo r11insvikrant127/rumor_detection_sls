@@ -1,92 +1,114 @@
+# ==========================================================
+# PAPER-FAITHFUL SLS CONFIGURATION
+# Wei et al. (IJCNN 2021)
+# ==========================================================
+
+# ----------------------------------------------------------
 # Data paths
+# ----------------------------------------------------------
 data_paths:
   raw_path: "data/raw"
   processed_path: "data/processed"
   splits_path: "data/splits"
-  
-# Features
+
+# ----------------------------------------------------------
+# Features (TABLE I — 31 FEATURES ONLY)
+# ----------------------------------------------------------
 features:
   user_features: true
   content_features: true
   propagation_features: true
-  
-# Model hyperparameters
+
+# ----------------------------------------------------------
+# Model hyperparameters (Section IV)
+# ----------------------------------------------------------
 model:
-  input_dim: 56
+  input_dim: 31        # PAPER FEATURE COUNT
   hidden_dim: 256
   lstm_hidden: 128
-  dropout_rate: 0.15
+  dropout_rate: 0.15   # paper value
   se_reduction: 16
-  use_cosine_layer: true        # <-- FIXED
   num_classes: 2
+
+  # Only paper feature groups
   use_propagation_features: true
   use_user_features: true
   use_content_features: true
-  use_depth_breadth_features: true
-  use_optional_features: true
-  
-# Loss configuration (paper-aligned)
+
+# ----------------------------------------------------------
+# Loss configuration (Circle Loss — paper)
+# ----------------------------------------------------------
 loss:
   loss_type: "circle"
   margin: 0.25
   gamma: 256
-  
-# Training configuration
+
+# ----------------------------------------------------------
+# Training configuration (Section V-B)
+# ----------------------------------------------------------
 training:
   batch_size: 32
   epochs: 100
   learning_rate: 0.001
   weight_decay: 1e-4
   grad_clip: 1.0
+
   patience: 10
+  early_stopping: true
+  early_stopping_patience: 10
+
   scheduler: "plateau"
   scheduler_mode: "max"
   scheduler_patience: 5
   scheduler_factor: 0.5
-  early_stopping: true
-  early_stopping_patience: 10
+
   primary_metric: "f1"
-  logit_scale: 10.0
-  
+
+# ----------------------------------------------------------
 # Data configuration
+# ----------------------------------------------------------
 data:
-  feature_dim: 56
+  feature_dim: 31        # PAPER FEATURE COUNT
   test_size: 0.2
   val_size: 0.1
   random_state: 42
   normalize_features: true
+
   train_path: "data/train.csv"
   test_path: "data/test.csv"
   cache_dir: "data/cache"
-  
+
+# ----------------------------------------------------------
 # Evaluation configuration
+# ----------------------------------------------------------
 evaluation:
-  use_wandb: false
-  wandb_project: "rumor-detection"
-  wandb_entity: null
-  compute_feature_importance: true
+  compute_feature_importance: false
   plot_confusion_matrix: true
   plot_roc_curve: true
   save_predictions: true
   output_dir: "results"
-  compare_31vs56: true
-  
-# GBDT configuration
+
+# ----------------------------------------------------------
+# GBDT fallback (Section IV-F)
+# ----------------------------------------------------------
 gbdt:
   enabled: true
+  threshold: 0.57        # PAPER VALUE
   n_estimators: 100
   learning_rate: 0.1
   max_depth: 5
   subsample: 0.8
   colsample_bytree: 0.8
   use_for_fallback: true
-  
+
+# ----------------------------------------------------------
 # Experiment configuration
+# ----------------------------------------------------------
 experiment:
-  experiment_name: "rumor_detection_56f"
+  experiment_name: "SLS_paper_faithful"
   experiment_id: null
   seed: 42
-  num_runs: 5
+  num_runs: 5            # 5-fold CV (paper)
   save_checkpoints: true
   checkpoint_dir: "checkpoints"
   log_dir: "logs"
