@@ -40,7 +40,7 @@ class SLSTrainer:
             self.model.parameters(),
             lr=self.config.get("learning_rate", 1e-3),
             betas=(0.9, 0.999),
-            weight_decay=self.config.get("weight_decay", 1e-4),  # ✅ FIXED
+            weight_decay=float(self.config.get("weight_decay", 1e-4))
         )
 
         # ---- Scheduler (now actually used) ----
