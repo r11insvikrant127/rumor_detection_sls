@@ -1,14 +1,13 @@
 """
 Paper-faithful trainer for SLS model.
-Implements training protocol aligned with Wei et al. (IJCNN 2021).
+Wei et al. (IJCNN 2021)
 
 TRAINING:
-    - Circle Loss on cosine similarities
-    - No softmax during optimization
+    - Circle Loss optimization
+    - No softmax during training
 
-INFERENCE (Eq.9):
-    - Softmax applied to cosine outputs
-    - Confidence thresholding
+INFERENCE:
+    - Temperature-scaled softmax (calibration only)
 """
 
 import torch
@@ -32,29 +31,36 @@ class SLSTrainer:
         self.device = device
         self.config = config or {}
 
-        # ---- Paper Loss ----
+        # ---- Circle Loss ----
         self.criterion = CircleLoss(m=0.25, gamma=256)
 
-        # ---- Optimizer (paper uses Adam) ----
+        # ---- Optimizer ----
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
-            lr=self.config.get("learning_rate", 1e-3),
+            lr=float(self.config.get("learning_rate", 1e-3)),
             betas=(0.9, 0.999),
-            weight_decay=float(self.config.get("weight_decay", 1e-4))
+            weight_decay=float(self.config.get("weight_decay", 1e-4)),
         )
 
-        # ---- Scheduler (now actually used) ----
+        # ---- Scheduler ----
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode="max",
             factor=float(self.config.get("scheduler_factor", 0.5)),
-            patience=int(self.config.get("scheduler_patience", 5))
+            patience=int(self.config.get("scheduler_patience", 5)),
         )
 
-        self.epochs = self.config.get("epochs", 100)
+        self.epochs = int(self.config.get("epochs", 100))
+
+        # ✅ NEW: temperature scaling (inference only)
+        self.temperature = float(self.config.get("temperature", 0.5))
+
+        # ✅ NEW: early stopping
+        self.early_stop = self.config.get("early_stopping", True)
+        self.patience = int(self.config.get("early_stopping_patience", 10))
 
     # =====================================================
-    # PREDICT (Eq.9)
+    # PREDICT (Eq.9 + temperature scaling)
     # =====================================================
     def predict(self, X, return_probs=False):
 
@@ -69,7 +75,9 @@ class SLSTrainer:
 
             outputs = self.model(X)
 
-            # Eq.(9): Softmax during inference only
+            # ✅ temperature scaling
+            outputs = outputs / self.temperature
+
             probs = torch.softmax(outputs, dim=1)
             preds = torch.argmax(probs, dim=1)
 
@@ -149,6 +157,9 @@ class SLSTrainer:
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
 
+                # ✅ temperature scaling
+                outputs = outputs / self.temperature
+
                 probs = torch.softmax(outputs, dim=1)
                 preds = torch.argmax(probs, dim=1)
 
@@ -174,14 +185,10 @@ class SLSTrainer:
         print("=" * 60)
         print("PAPER-FAITHFUL TRAINING")
         print("=" * 60)
-        print("Loss: Circle Loss (γ=256, m=0.25)")
-        print("Optimizer: Adam")
-        print("Scheduler: ReduceLROnPlateau")
-        print(f"Epochs: {self.epochs}")
-        print("=" * 60)
 
         best_f1 = -1
         best_state = None
+        no_improve = 0
 
         for epoch in range(1, self.epochs + 1):
 
@@ -191,7 +198,6 @@ class SLSTrainer:
 
             val_metrics = self.validate(val_loader)
 
-            # ---- Scheduler step ----
             self.scheduler.step(val_metrics["f1"])
 
             print(
@@ -200,12 +206,18 @@ class SLSTrainer:
                 f"Val F1 {val_metrics['f1']:.4f}"
             )
 
-            # ---- Save BEST model (paper-faithful evaluation) ----
             if val_metrics["f1"] > best_f1:
                 best_f1 = val_metrics["f1"]
                 best_state = deepcopy(self.model.state_dict())
+                no_improve = 0
+            else:
+                no_improve += 1
 
-        # Restore best model
+            # ✅ Early stopping
+            if self.early_stop and no_improve >= self.patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
         if best_state is not None:
             self.model.load_state_dict(best_state)
 
