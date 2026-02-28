@@ -15,25 +15,33 @@ class CircleLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, logits, labels):
+        """
+        Circle Loss for classification (paper-compatible version)
+
+        logits : (B, C) cosine similarities
+        labels : (B,)
+        """
 
         one_hot = F.one_hot(labels, num_classes=logits.size(1)).float()
 
-        sp = logits[one_hot == 1]
-        sn = logits[one_hot == 0]
+        # positive similarity per sample
+        sp = (logits * one_hot).sum(dim=1)        # (B,)
+
+        # negative similarities per sample
+        sn = logits * (1 - one_hot)               # (B, C)
 
         # adaptive weights
-        ap = torch.clamp_min(-sp.detach() + 1 + self.m, 0.)
+        ap = torch.clamp_min(1 + self.m - sp.detach(), 0.)
         an = torch.clamp_min(sn.detach() + self.m, 0.)
 
         delta_p = 1 - self.m
         delta_n = self.m
 
-        logit_p = -self.gamma * ap * (sp - delta_p)
-        logit_n = self.gamma * an * (sn - delta_n)
+        logit_p = -self.gamma * ap * (sp - delta_p)      # (B,)
+        logit_n = self.gamma * an * (sn - delta_n)       # (B, C)
 
         loss = F.softplus(
-            torch.logsumexp(logit_n, dim=0) +
-            torch.logsumexp(logit_p, dim=0)
+            torch.logsumexp(logit_n, dim=1) + logit_p
         )
 
         if self.reduction == "mean":
