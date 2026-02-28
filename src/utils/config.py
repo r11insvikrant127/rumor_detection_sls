@@ -1,30 +1,22 @@
 from __future__ import annotations
 
-# What this file is used for
-# This file is NOT training code and NOT the model.
-# It is a Configuration Manager.
-# Think of it as the brain that tells every other file how to behave.
-# What it controls in your system
-# When you run:
-# train.py
-# predict.py
-# main.py
-# they do something like:
-# config = ConfigManager("config.yaml")
-# Then they read:
-# config.model.input_dim
-# config.loss.loss_type
-# config.training.batch_size
-# config.gbdt.threshold
-# So this file defines:
-# Component	Controlled by this file
-# Model architecture	input size, dropout, classes
-# Loss function	circle loss params
-# Training	LR, epochs, scheduler
-# Feature usage	which features enabled
-# Evaluation	metrics & outputs
-# GBDT fallback	uncertainty rule
-# Experiments	seeds & runs
+"""
+Configuration Manager for SLS Rumor Detection System.
+
+This file defines ALL experiment configuration used by:
+
+    train.py
+    predict.py
+    main.py
+
+Usage:
+    config = ConfigManager("configs/default.yaml")
+
+Then access:
+    config.model.input_dim
+    config.training.batch_size
+    config.gbdt.threshold
+"""
 
 import yaml
 import logging
@@ -75,7 +67,8 @@ class TrainingConfig:
     weight_decay: float = 1e-4
     grad_clip: float = 1.0
 
-    threshold: float = 0.57  # Paper hybrid threshold
+    # ✅ inference calibration (does NOT change training objective)
+    temperature: float = 1.0
 
     scheduler: str = "plateau"
     scheduler_mode: str = "max"
@@ -118,12 +111,14 @@ class EvaluationConfig:
 
 
 # ============================================================
-# GBDT CONFIG
+# GBDT CONFIG (Hybrid fallback — Paper Section IV-F)
 # ============================================================
 
 @dataclass
 class GBDTConfig:
     enabled: bool = True
+
+    # ✅ SINGLE SOURCE OF TRUTH FOR THRESHOLD
     threshold: float = 0.57
 
     n_estimators: int = 100
@@ -199,13 +194,15 @@ class ConfigManager:
 
     def _validate(self):
 
+        # feature consistency
         if self.model.input_dim != self.data.feature_dim:
             raise ValueError(
                 "Model input_dim must equal feature_dim (31 features)"
             )
 
-        if not (0 <= self.training.threshold <= 1):
-            raise ValueError("Training threshold must be in [0,1]")
+        # threshold validation (correct location)
+        if not (0 <= self.gbdt.threshold <= 1):
+            raise ValueError("GBDT threshold must be in [0,1]")
 
         if self.loss.loss_type != "circle":
             raise ValueError("Paper requires Circle Loss")
@@ -246,9 +243,3 @@ class ConfigManager:
 
 def load_config(config_path: Optional[str] = None) -> ConfigManager:
     return ConfigManager(config_path)
-
-
-
-
-
-
