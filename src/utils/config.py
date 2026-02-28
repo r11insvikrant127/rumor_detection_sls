@@ -3,16 +3,14 @@ from __future__ import annotations
 """
 Configuration Manager for SLS Rumor Detection System.
 
-This file defines ALL experiment configuration used by:
-
+Central configuration controller used by:
     train.py
     predict.py
     main.py
 
-Usage:
+Access example:
     config = ConfigManager("configs/default.yaml")
 
-Then access:
     config.model.input_dim
     config.training.batch_size
     config.gbdt.threshold
@@ -67,7 +65,7 @@ class TrainingConfig:
     weight_decay: float = 1e-4
     grad_clip: float = 1.0
 
-    # ✅ inference calibration (does NOT change training objective)
+    # inference calibration (does NOT change training objective)
     temperature: float = 1.0
 
     scheduler: str = "plateau"
@@ -118,7 +116,7 @@ class EvaluationConfig:
 class GBDTConfig:
     enabled: bool = True
 
-    # ✅ SINGLE SOURCE OF TRUTH FOR THRESHOLD
+    # SINGLE SOURCE OF TRUTH FOR HYBRID THRESHOLD
     threshold: float = 0.57
 
     n_estimators: int = 100
@@ -174,6 +172,23 @@ class ConfigManager:
         self._validate()
 
     # --------------------------------------------------------
+    # YAML NUMERIC SAFE LOADING
+    # --------------------------------------------------------
+
+    def _convert_numbers(self, obj):
+        """Automatically convert numeric strings to floats."""
+        if isinstance(obj, dict):
+            return {k: self._convert_numbers(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._convert_numbers(v) for v in obj]
+        if isinstance(obj, str):
+            try:
+                return float(obj)
+            except ValueError:
+                return obj
+        return obj
+
+    # --------------------------------------------------------
 
     def _load_yaml(self, path: Optional[str]) -> Dict[str, Any]:
 
@@ -188,7 +203,8 @@ class ConfigManager:
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
 
-        return data
+        # ✅ automatic numeric casting
+        return self._convert_numbers(data)
 
     # --------------------------------------------------------
 
@@ -200,7 +216,7 @@ class ConfigManager:
                 "Model input_dim must equal feature_dim (31 features)"
             )
 
-        # threshold validation (correct location)
+        # hybrid threshold validation
         if not (0 <= self.gbdt.threshold <= 1):
             raise ValueError("GBDT threshold must be in [0,1]")
 
@@ -213,7 +229,6 @@ class ConfigManager:
     # --------------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
-
         return {
             "model": asdict(self.model),
             "loss": asdict(self.loss),
