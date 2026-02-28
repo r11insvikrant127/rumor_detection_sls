@@ -1,16 +1,11 @@
 """
-PAPER-EXACT SLS TRAINING SCRIPT
+PAPER-FAITHFUL SLS TRAINING SCRIPT
 5-Fold Cross Validation + Hybrid SLS-GBDT
-+ Threshold Sweep (Paper Section V-D)
+with Correct Threshold Logic
 """
 
 import sys
 import os
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-sys.path.insert(0, project_root)
-
 import json
 import numpy as np
 import torch
@@ -18,6 +13,10 @@ import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import GradientBoostingClassifier
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, project_root)
 
 from src.preprocessing.feature_extractor import FeatureExtractor
 from src.preprocessing.feature_normalizer import FeatureNormalizer
@@ -29,7 +28,7 @@ from src.utils.helpers import create_data_loader, set_seed
 
 
 # =====================================================
-# TRAINER PIPELINE
+# TRAINER
 # =====================================================
 
 class RumorDetectionTrainer:
@@ -44,12 +43,11 @@ class RumorDetectionTrainer:
         )
 
         self.feature_extractor = FeatureExtractor()
-
         self.feature_names = list(
             self.feature_extractor.get_feature_names()
         )[:31]
 
-        self.threshold = 0.57  # initial paper value
+        self.threshold = 0.57  # initial value (paper)
 
         print("✅ PAPER EXACT: Using 31 features")
 
@@ -60,10 +58,10 @@ class RumorDetectionTrainer:
 
         index_df = pd.read_csv(index_file)
 
-        features, labels, graphs = [], [], []
+        features, labels = [], []
         skipped = 0
 
-        print("Loading dataset using index file...")
+        print("Loading dataset...")
 
         for _, row in index_df.iterrows():
 
@@ -73,28 +71,16 @@ class RumorDetectionTrainer:
                 with open(file_path, "r", encoding="utf-8") as f:
                     event = json.load(f)
 
-                if (
-                    "source" not in event
-                    or event["source"] is None
-                    or "id" not in event["source"]
-                ):
+                if "source" not in event or event["source"] is None:
                     skipped += 1
                     continue
 
                 tweets = [event["source"]]
-
-                if "replies" in event and event["replies"]:
+                if "replies" in event:
                     tweets.extend(event["replies"])
 
                 event["tweets"] = tweets
                 event["source_id"] = str(event["source"]["id"])
-
-                graph = self.feature_extractor.tree_builder.build_from_tweets(
-                    tweets,
-                    source_id=event["source_id"]
-                )
-
-                graphs.append(graph)
 
                 feat = self.feature_extractor.extract_features(event)
 
@@ -102,37 +88,46 @@ class RumorDetectionTrainer:
                 labels.append(int(row["label"]))
 
             except Exception as e:
-                print(f"\n❌ Error processing file: {file_path}")
-                print("Reason:", e)
+                print(f"Error processing {file_path}: {e}")
                 raise
 
         X = np.nan_to_num(np.array(features, dtype=np.float32))
         y = np.array(labels)
 
-        print(f"\n✅ Loaded dataset: {X.shape}")
-        print(f"Rumors: {np.sum(y)} | Non-rumors: {len(y)-np.sum(y)}")
+        print(f"Dataset loaded: {X.shape}")
         print(f"Skipped events: {skipped}")
 
         return X, y
 
     # -------------------------------------------------
-    # 5-FOLD CV
+    # CONFIDENCE COMPUTATION (paper rule)
+    # -------------------------------------------------
+    @staticmethod
+    def compute_confidence(probs):
+        probs = np.array(probs)
+
+        # Case 1: full softmax output (N,2)
+        if probs.ndim == 2:
+            return probs.max(axis=1)
+
+        # Case 2: only class-1 probability (N,)
+        return np.maximum(probs, 1 - probs)
+
+    # -------------------------------------------------
+    # CROSS VALIDATION
     # -------------------------------------------------
     def train_cross_validation(self, X, y):
 
-        skf = StratifiedKFold(
-            n_splits=5,
-            shuffle=True,
-            random_state=42
-        )
+        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
         fold_results = []
+        chosen_thresholds = []
 
         for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), 1):
 
-            print("\n" + "="*50)
+            print("\n" + "="*60)
             print(f"Fold {fold}/5")
-            print("="*50)
+            print("="*60)
 
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
@@ -172,54 +167,69 @@ class RumorDetectionTrainer:
 
             trainer.train(train_loader, val_loader)
 
-            # ==================================================
-            # GBDT + THRESHOLD SWEEP
-            # ==================================================
+            # ---------- Train GBDT ----------
             print("🌳 Training GBDT fallback...")
-
-            gbdt = GradientBoostingClassifier(random_state=42)
+            gbdt = GradientBoostingClassifier(
+                random_state=42,
+                subsample=0.8
+            )
             gbdt.fit(X_train, y_train)
 
+            # ---------- Predictions ----------
             preds_sls, probs_sls = trainer.predict(
-                X_val.reshape(X_val.shape[0], 1, 31),
+                X_val.reshape(len(X_val), 1, 31),
                 return_probs=True
             )
 
-            probs_sls = np.array(probs_sls)
+            max_probs = self.compute_confidence(probs_sls)
+
+            print("Mean confidence:", max_probs.mean())
+
+            # ---------- Threshold Sweep ----------
+            thresholds = np.arange(0.45, 0.66, 0.02)
 
             best_f1 = -1
             best_threshold = self.threshold
             best_preds = None
 
-            thresholds = np.arange(0.45, 0.66, 0.02)
-
             for t in thresholds:
 
                 preds_temp = preds_sls.copy()
-                uncertain = probs_sls < t
+
+                uncertain = max_probs < t
+                routing_rate = uncertain.mean()
+
+                print(f"t={t:.2f} | routed={routing_rate:.3f}")
 
                 if np.any(uncertain):
                     preds_temp[uncertain] = gbdt.predict(
                         X_val[uncertain]
                     )
 
-                metrics_temp = Evaluator.compute_metrics(
-                    y_val,
-                    preds_temp
-                )
+                metrics = Evaluator.compute_metrics(y_val, preds_temp)
 
-                if metrics_temp["f1"] > best_f1:
-                    best_f1 = metrics_temp["f1"]
+                if metrics["f1"] > best_f1:
+                    best_f1 = metrics["f1"]
                     best_threshold = t
                     best_preds = preds_temp
 
-            print(f"✅ Best threshold (fold {fold}): {best_threshold:.2f}")
+            chosen_thresholds.append(best_threshold)
+
+            print(f"Best threshold fold {fold}: {best_threshold:.2f}")
 
             metrics = Evaluator.compute_metrics(y_val, best_preds)
             fold_results.append(metrics)
 
             print(f"Accuracy: {metrics['accuracy']:.4f}")
             print(f"F1:       {metrics['f1']:.4f}")
+
+        # ---------- Global Threshold ----------
+        final_threshold = float(np.mean(chosen_thresholds))
+        self.threshold = final_threshold
+
+        print("\n" + "="*60)
+        print(f"GLOBAL THRESHOLD SELECTED: {final_threshold:.3f}")
+        print("="*60)
 
         return fold_results
 
@@ -231,7 +241,7 @@ class RumorDetectionTrainer:
 def main():
 
     print("="*60)
-    print("PAPER-EXACT SLS TRAINING (5-FOLD CV)")
+    print("PAPER-FAITHFUL SLS TRAINING")
     print("="*60)
 
     trainer = RumorDetectionTrainer("configs/default.yaml")
@@ -242,16 +252,10 @@ def main():
 
     results = trainer.train_cross_validation(X, y)
 
-    print("\n" + "="*60)
-    print("FINAL RESULTS")
-    print("="*60)
-
+    print("\nFINAL RESULTS")
     for metric in ["accuracy", "f1", "precision", "recall"]:
         vals = [r[metric] for r in results]
-        print(f"{metric.capitalize():10s}: "
-              f"{np.mean(vals):.4f} ± {np.std(vals):.4f}")
-
-    print("\n✅ PAPER-EXACT TRAINING COMPLETE")
+        print(f"{metric:10s}: {np.mean(vals):.4f} ± {np.std(vals):.4f}")
 
 
 if __name__ == "__main__":
