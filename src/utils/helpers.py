@@ -85,31 +85,61 @@ def normalize_features(
 # DATALOADER (SLS INPUT FORMAT)
 # ============================================================
 
+from torch.utils.data import WeightedRandomSampler
+
+
 def create_data_loader(
     features: np.ndarray,
     labels: np.ndarray,
     batch_size: int = 32,
     shuffle: bool = True,
-    add_channel_dim: bool = True,    
+    add_channel_dim: bool = True,
+    use_weighted_sampler: bool = False,
 ) -> torch.utils.data.DataLoader:
     """
     Create DataLoader with required shape (N,1,L).
+
+    If use_weighted_sampler=True:
+        performs class-balanced sampling WITHOUT modifying loss.
     """
 
     x = torch.FloatTensor(features)
 
     if add_channel_dim:
         x = x.unsqueeze(1)
+
     y = torch.LongTensor(labels)
 
     dataset = torch.utils.data.TensorDataset(x, y)
 
+    sampler = None
+
+    # --------------------------------------------------
+    # CLASS-BALANCED SAMPLING (paper-safe improvement)
+    # --------------------------------------------------
+    if use_weighted_sampler:
+
+        class_counts = np.bincount(labels)
+        class_weights = 1.0 / class_counts
+
+        sample_weights = class_weights[labels]
+
+        sampler = WeightedRandomSampler(
+            weights=torch.DoubleTensor(sample_weights),
+            num_samples=len(sample_weights),
+            replacement=True,
+        )
+
+        shuffle = False  # sampler controls ordering
+
+    # --------------------------------------------------
     return torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
+        shuffle=shuffle if sampler is None else False,
+        sampler=sampler,
         num_workers=0,
-        pin_memory=True
+        pin_memory=True,
     )
 
 
