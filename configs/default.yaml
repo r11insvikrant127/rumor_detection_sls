@@ -62,7 +62,7 @@ training:
   scheduler_factor: 0.5
 
   # ✅ NEW
-  temperature: 0.5
+  temperature: 0.7
 
 # ----------------------------------------------------------
 # Data configuration
