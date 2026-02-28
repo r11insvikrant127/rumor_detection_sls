@@ -153,9 +153,11 @@ class RumorDetectionTrainer:
             )
 
             train_loader = create_data_loader(
-                X_train, y_train,
+                X_train,
+                y_train,
                 batch_size=self.config.training.batch_size,
-                add_channel_dim=True
+                add_channel_dim=True,
+                use_weighted_sampler=True,   # ⭐ ENABLED
             )
 
             val_loader = create_data_loader(
