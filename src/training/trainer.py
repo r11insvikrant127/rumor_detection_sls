@@ -48,8 +48,7 @@ class SLSTrainer:
             self.optimizer,
             mode="max",
             factor=float(self.config.get("scheduler_factor", 0.5)),
-            patience=int(self.config.get("scheduler_patience", 5)),
-            verbose=True,
+            patience=int(self.config.get("scheduler_patience", 5))
         )
 
         self.epochs = self.config.get("epochs", 100)
