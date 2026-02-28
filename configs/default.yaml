@@ -61,7 +61,8 @@ training:
   scheduler_patience: 5
   scheduler_factor: 0.5
 
-  primary_metric: "f1"
+  # ✅ NEW
+  temperature: 0.5
 
 # ----------------------------------------------------------
 # Data configuration
