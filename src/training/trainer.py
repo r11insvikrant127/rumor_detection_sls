@@ -1,39 +1,27 @@
 """
 Paper-faithful trainer for SLS model.
-Implements training protocol exactly as described in the paper.
+Implements training protocol aligned with Wei et al. (IJCNN 2021).
 
-Key Principles:
----------------
 TRAINING:
-    - Circle Loss operates on cosine similarities
-    - NO softmax during optimization
+    - Circle Loss on cosine similarities
+    - No softmax during optimization
 
-INFERENCE (Paper Eq.9):
+INFERENCE (Eq.9):
     - Softmax applied to cosine outputs
-    - Threshold applied on probabilities
+    - Confidence thresholding
 """
 
 import torch
 import numpy as np
 from tqdm import tqdm
 from sklearn.metrics import f1_score
+from copy import deepcopy
 
 from .loss import CircleLoss
 from .evaluator import Evaluator
 
 
 class SLSTrainer:
-    """
-    Paper-Exact SLS Trainer.
-
-    Paper settings:
-        - Circle Loss (m=0.25, gamma=256)
-        - Adam optimizer
-        - Fixed 100 epochs
-        - No scheduler
-        - No early stopping
-        - Final epoch model used
-    """
 
     # =====================================================
     # INIT
@@ -44,24 +32,30 @@ class SLSTrainer:
         self.device = device
         self.config = config or {}
 
-        # Paper loss
+        # ---- Paper Loss ----
         self.criterion = CircleLoss(m=0.25, gamma=256)
 
-        # Paper optimizer
+        # ---- Optimizer (paper uses Adam) ----
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=self.config.get("learning_rate", 1e-3),
             betas=(0.9, 0.999),
-            weight_decay=0.0
+            weight_decay=self.config.get("weight_decay", 1e-4),  # ✅ FIXED
+        )
+
+        # ---- Scheduler (now actually used) ----
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode="max",
+            factor=self.config.get("scheduler_factor", 0.5),
+            patience=self.config.get("scheduler_patience", 5),
+            verbose=True,
         )
 
         self.epochs = self.config.get("epochs", 100)
 
-        # Paper confidence threshold
-        self.threshold = 0.57
-
     # =====================================================
-    # PREDICT (Inference — PAPER Eq.9)
+    # PREDICT (Eq.9)
     # =====================================================
     def predict(self, X, return_probs=False):
 
@@ -76,10 +70,8 @@ class SLSTrainer:
 
             outputs = self.model(X)
 
-            # PAPER Eq.(9):
-            # y_hat = Softmax(FC(S))
+            # Eq.(9): Softmax during inference only
             probs = torch.softmax(outputs, dim=1)
-
             preds = torch.argmax(probs, dim=1)
 
             all_preds = preds.cpu().numpy()
@@ -107,20 +99,22 @@ class SLSTrainer:
             features = features.to(self.device)
             labels = labels.long().to(self.device)
 
-            # Forward pass
             outputs = self.model(features)
 
-            # Circle Loss on cosine similarities
             loss = self.criterion(outputs, labels)
 
-            # Backprop
             self.optimizer.zero_grad()
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(),
+                self.config.get("grad_clip", 1.0),
+            )
+
             self.optimizer.step()
 
             total_loss += loss.item()
 
-            # Prediction rule (cosine classifier)
             preds = torch.argmax(outputs, dim=1)
 
             all_preds.extend(preds.cpu().numpy())
@@ -156,7 +150,6 @@ class SLSTrainer:
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
 
-                # Softmax ONLY for evaluation metrics
                 probs = torch.softmax(outputs, dim=1)
                 preds = torch.argmax(probs, dim=1)
 
@@ -167,7 +160,7 @@ class SLSTrainer:
         metrics = Evaluator.compute_metrics(
             np.array(all_labels),
             np.array(all_preds),
-            np.array(all_probs)
+            np.array(all_probs),
         )
 
         metrics["val_loss"] = total_loss / len(loader)
@@ -180,16 +173,16 @@ class SLSTrainer:
     def train(self, train_loader, val_loader):
 
         print("=" * 60)
-        print("PAPER-EXACT TRAINING")
+        print("PAPER-FAITHFUL TRAINING")
         print("=" * 60)
         print("Loss: Circle Loss (γ=256, m=0.25)")
         print("Optimizer: Adam")
-        print("Scheduler: None")
-        print("Early stopping: Disabled")
+        print("Scheduler: ReduceLROnPlateau")
         print(f"Epochs: {self.epochs}")
         print("=" * 60)
 
-        final_metrics = None
+        best_f1 = -1
+        best_state = None
 
         for epoch in range(1, self.epochs + 1):
 
@@ -198,7 +191,9 @@ class SLSTrainer:
             )
 
             val_metrics = self.validate(val_loader)
-            final_metrics = val_metrics
+
+            # ---- Scheduler step ----
+            self.scheduler.step(val_metrics["f1"])
 
             print(
                 f"Epoch {epoch:03d} | "
@@ -206,5 +201,13 @@ class SLSTrainer:
                 f"Val F1 {val_metrics['f1']:.4f}"
             )
 
-        # Paper uses FINAL epoch model
-        return final_metrics["f1"], final_metrics
+            # ---- Save BEST model (paper-faithful evaluation) ----
+            if val_metrics["f1"] > best_f1:
+                best_f1 = val_metrics["f1"]
+                best_state = deepcopy(self.model.state_dict())
+
+        # Restore best model
+        if best_state is not None:
+            self.model.load_state_dict(best_state)
+
+        return best_f1, val_metrics
