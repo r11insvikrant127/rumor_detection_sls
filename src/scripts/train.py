@@ -256,9 +256,20 @@ class RumorDetectionTrainer:
             )
 
             preds_final = preds_sls.copy()
-            probs_sls = np.array(probs_sls)
 
-            uncertain = probs_sls < self.threshold
+            # get full probability matrix
+            _, probs_full = trainer.predict(
+                X_val.reshape(X_val.shape[0], 1, 31),
+                return_probs=True
+            )
+
+            # convert to 2-class probability matrix
+            probs_full = np.vstack([1 - probs_full, probs_full]).T
+
+            # PAPER RULE: confidence = max probability
+            confidence = np.max(probs_full, axis=1)
+
+            uncertain = confidence < self.threshold
 
             if np.any(uncertain):
                 preds_final[uncertain] = gbdt.predict(X_val[uncertain])
