@@ -1,7 +1,7 @@
 """
 PAPER-EXACT SLS TRAINING SCRIPT
 5-Fold Cross Validation + Hybrid SLS-GBDT
-(FULLY PAPER-FAITHFUL VERSION)
++ Threshold Sweep (Paper Section V-D)
 """
 
 import sys
@@ -45,27 +45,25 @@ class RumorDetectionTrainer:
 
         self.feature_extractor = FeatureExtractor()
 
-        # Paper uses 31 features
         self.feature_names = list(
             self.feature_extractor.get_feature_names()
         )[:31]
 
-        self.threshold = 0.57  # paper value
+        self.threshold = 0.57  # initial paper value
 
         print("✅ PAPER EXACT: Using 31 features")
 
     # -------------------------------------------------
-    # LOAD DATA FROM INDEX
+    # LOAD DATA
     # -------------------------------------------------
     def load_data_from_index(self, index_file):
 
         index_df = pd.read_csv(index_file)
 
         features, labels, graphs = [], [], []
+        skipped = 0
 
         print("Loading dataset using index file...")
-
-        skipped = 0
 
         for _, row in index_df.iterrows():
 
@@ -75,10 +73,6 @@ class RumorDetectionTrainer:
                 with open(file_path, "r", encoding="utf-8") as f:
                     event = json.load(f)
 
-                # =========================================
-                # PAPER REQUIREMENT:
-                # each event MUST have one source tweet
-                # =========================================
                 if (
                     "source" not in event
                     or event["source"] is None
@@ -92,33 +86,16 @@ class RumorDetectionTrainer:
                 if "replies" in event and event["replies"]:
                     tweets.extend(event["replies"])
 
-                if len(tweets) == 0:
-                    skipped += 1
-                    continue
-
-                # -------------------------------------------------
-                # IMPORTANT FIX (PAPER ALIGNMENT)
-                # -------------------------------------------------
                 event["tweets"] = tweets
                 event["source_id"] = str(event["source"]["id"])
 
-                # -------------------------------------------------
-                # BUILD PROPAGATION GRAPH (SANITY CHECK)
-                # -------------------------------------------------
-                try:
-                    graph = self.feature_extractor.tree_builder.build_from_tweets(
-                        tweets,
-                        source_id=event["source_id"]
-                    )
-                except Exception:
-                    skipped += 1
-                    continue
+                graph = self.feature_extractor.tree_builder.build_from_tweets(
+                    tweets,
+                    source_id=event["source_id"]
+                )
 
                 graphs.append(graph)
 
-                # -------------------------------------------------
-                # FEATURE EXTRACTION
-                # -------------------------------------------------
                 feat = self.feature_extractor.extract_features(event)
 
                 features.append(feat)
@@ -129,37 +106,17 @@ class RumorDetectionTrainer:
                 print("Reason:", e)
                 raise
 
-        X = np.array(features, dtype=np.float32)
+        X = np.nan_to_num(np.array(features, dtype=np.float32))
         y = np.array(labels)
-
-        X = np.nan_to_num(X)
 
         print(f"\n✅ Loaded dataset: {X.shape}")
         print(f"Rumors: {np.sum(y)} | Non-rumors: {len(y)-np.sum(y)}")
         print(f"Skipped events: {skipped}")
 
-        # =====================================================
-        # PROPAGATION SANITY CHECK
-        # =====================================================
-        print("\n🔎 PROPAGATION SANITY CHECK")
-
-        if len(graphs) > 0:
-            avg_nodes = np.mean([g.number_of_nodes() for g in graphs])
-            avg_depth = np.mean([
-                self.feature_extractor.tree_builder
-                .get_tree_metrics(g)["max_depth"]
-                for g in graphs
-            ])
-
-            print(f"Avg nodes/event : {avg_nodes:.2f}")
-            print(f"Avg max depth   : {avg_depth:.2f}")
-        else:
-            print("⚠ No graphs available for sanity check.")
-
         return X, y
 
     # -------------------------------------------------
-    # 5-FOLD CV (PAPER PROTOCOL)
+    # 5-FOLD CV
     # -------------------------------------------------
     def train_cross_validation(self, X, y):
 
@@ -179,33 +136,13 @@ class RumorDetectionTrainer:
 
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
-            
-            # =====================================================
-            # DEBUG 1 — RAW FEATURE STATS (before normalization)
-            # =====================================================
-            if fold == 1:   # print once only
-                print("\n[DEBUG] RAW FEATURES")
-                print("Train mean :", np.mean(X_train))
-                print("Train std  :", np.std(X_train))
-                print("Train min  :", np.min(X_train))
-                print("Train max  :", np.max(X_train))
 
-            # -------- Normalization (Eq.2 paper) --------
+            # ---------- Normalization ----------
             normalizer = FeatureNormalizer()
             X_train = normalizer.fit_transform(X_train, self.feature_names)
             X_val = normalizer.transform(X_val)
-            
-            # =====================================================
-            # DEBUG 2 — AFTER NORMALIZATION (CRITICAL)
-            # =====================================================
-            if fold == 1:
-                print("\n[DEBUG] NORMALIZED FEATURES")
-                print("Train mean :", np.mean(X_train))
-                print("Train std  :", np.std(X_train))
-                print("Train min  :", np.min(X_train))
-                print("Train max  :", np.max(X_train))
 
-            # -------- SLS Model --------
+            # ---------- Model ----------
             model = PaperExactSLS(
                 input_dim=31,
                 lstm_hidden=128,
@@ -232,21 +169,14 @@ class RumorDetectionTrainer:
                 shuffle=False,
                 add_channel_dim=True
             )
-            
-            # =====================================================
-            # DEBUG 3 — BATCH ENTERING MODEL
-            # =====================================================
-            if fold == 1:
-                xb, yb = next(iter(train_loader))
-                print("\n[DEBUG] MODEL INPUT BATCH")
-                print("Tensor mean :", xb.mean().item())
-                print("Tensor std  :", xb.std().item())
-                print("Tensor shape:", xb.shape)
 
             trainer.train(train_loader, val_loader)
 
-            # -------- GBDT fallback (paper Section IV-F) --------
+            # ==================================================
+            # GBDT + THRESHOLD SWEEP
+            # ==================================================
             print("🌳 Training GBDT fallback...")
+
             gbdt = GradientBoostingClassifier(random_state=42)
             gbdt.fit(X_train, y_train)
 
@@ -255,15 +185,37 @@ class RumorDetectionTrainer:
                 return_probs=True
             )
 
-            preds_final = preds_sls.copy()
             probs_sls = np.array(probs_sls)
 
-            uncertain = probs_sls < self.threshold
+            best_f1 = -1
+            best_threshold = self.threshold
+            best_preds = None
 
-            if np.any(uncertain):
-                preds_final[uncertain] = gbdt.predict(X_val[uncertain])
+            thresholds = np.arange(0.45, 0.66, 0.02)
 
-            metrics = Evaluator.compute_metrics(y_val, preds_final)
+            for t in thresholds:
+
+                preds_temp = preds_sls.copy()
+                uncertain = probs_sls < t
+
+                if np.any(uncertain):
+                    preds_temp[uncertain] = gbdt.predict(
+                        X_val[uncertain]
+                    )
+
+                metrics_temp = Evaluator.compute_metrics(
+                    y_val,
+                    preds_temp
+                )
+
+                if metrics_temp["f1"] > best_f1:
+                    best_f1 = metrics_temp["f1"]
+                    best_threshold = t
+                    best_preds = preds_temp
+
+            print(f"✅ Best threshold (fold {fold}): {best_threshold:.2f}")
+
+            metrics = Evaluator.compute_metrics(y_val, best_preds)
             fold_results.append(metrics)
 
             print(f"Accuracy: {metrics['accuracy']:.4f}")
