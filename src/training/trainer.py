@@ -1,6 +1,16 @@
 """
 Paper-faithful trainer for SLS model.
 Implements training protocol exactly as described in the paper.
+
+Key Principles:
+---------------
+TRAINING:
+    - Circle Loss operates on cosine similarities
+    - NO softmax during optimization
+
+INFERENCE (Paper Eq.9):
+    - Softmax applied to cosine outputs
+    - Threshold applied on probabilities
 """
 
 import torch
@@ -16,29 +26,28 @@ class SLSTrainer:
     """
     Paper-Exact SLS Trainer.
 
-    Paper training settings:
+    Paper settings:
         - Circle Loss (m=0.25, gamma=256)
         - Adam optimizer
-        - Fixed epochs (100)
+        - Fixed 100 epochs
         - No scheduler
         - No early stopping
         - Final epoch model used
     """
 
+    # =====================================================
+    # INIT
+    # =====================================================
     def __init__(self, model, device="cuda", config=None):
 
         self.model = model.to(device)
         self.device = device
         self.config = config or {}
 
-        # -------------------------
-        # PAPER LOSS
-        # -------------------------
+        # Paper loss
         self.criterion = CircleLoss(m=0.25, gamma=256)
 
-        # -------------------------
-        # PAPER OPTIMIZER
-        # -------------------------
+        # Paper optimizer
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=self.config.get("learning_rate", 1e-3),
@@ -46,44 +55,31 @@ class SLSTrainer:
             weight_decay=0.0
         )
 
-        # Paper uses fixed epochs
         self.epochs = self.config.get("epochs", 100)
 
-        # Paper threshold (used later in inference)
+        # Paper confidence threshold
         self.threshold = 0.57
-    
+
     # =====================================================
-    # PREDICT (Inference)
+    # PREDICT (Inference — PAPER Eq.9)
     # =====================================================
     def predict(self, X, return_probs=False):
-        """
-        Run inference using trained SLS model.
-
-        Args:
-            X : numpy array or tensor
-                shape (N, 1, 31) or (N, 31)
-            return_probs : bool
-
-        Returns:
-            predictions, probabilities(optional)
-        """
 
         self.model.eval()
 
-        # Convert numpy → tensor
         if isinstance(X, np.ndarray):
             X = torch.tensor(X, dtype=torch.float32)
 
         X = X.to(self.device)
 
-        all_preds = []
-        all_probs = []
-
         with torch.no_grad():
 
             outputs = self.model(X)
 
+            # PAPER Eq.(9):
+            # y_hat = Softmax(FC(S))
             probs = torch.softmax(outputs, dim=1)
+
             preds = torch.argmax(probs, dim=1)
 
             all_preds = preds.cpu().numpy()
@@ -111,9 +107,10 @@ class SLSTrainer:
             features = features.to(self.device)
             labels = labels.long().to(self.device)
 
-            # Forward
+            # Forward pass
             outputs = self.model(features)
 
+            # Circle Loss on cosine similarities
             loss = self.criterion(outputs, labels)
 
             # Backprop
@@ -123,9 +120,8 @@ class SLSTrainer:
 
             total_loss += loss.item()
 
-            # Metrics
-            probs = torch.softmax(outputs, dim=1)
-            preds = torch.argmax(probs, dim=1)
+            # Prediction rule (cosine classifier)
+            preds = torch.argmax(outputs, dim=1)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -135,7 +131,6 @@ class SLSTrainer:
 
         epoch_loss = total_loss / len(loader)
         epoch_acc = (np.array(all_preds) == np.array(all_labels)).mean()
-
         epoch_f1 = f1_score(all_labels, all_preds, average="binary")
 
         return epoch_loss, epoch_acc, epoch_f1
@@ -161,17 +156,18 @@ class SLSTrainer:
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
 
+                # Softmax ONLY for evaluation metrics
                 probs = torch.softmax(outputs, dim=1)
                 preds = torch.argmax(probs, dim=1)
 
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
-                all_probs.extend(probs.cpu().numpy())
+                all_probs.extend(probs[:, 1].cpu().numpy())
 
         metrics = Evaluator.compute_metrics(
             np.array(all_labels),
             np.array(all_preds),
-            np.array(all_probs)[:, 1]
+            np.array(all_probs)
         )
 
         metrics["val_loss"] = total_loss / len(loader)
@@ -210,5 +206,5 @@ class SLSTrainer:
                 f"Val F1 {val_metrics['f1']:.4f}"
             )
 
-        # PAPER: use FINAL epoch model
+        # Paper uses FINAL epoch model
         return final_metrics["f1"], final_metrics
