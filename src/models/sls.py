@@ -176,6 +176,9 @@ class PaperExactSLS(nn.Module):
         # --- Flatten ---
         x = x.squeeze(-1).reshape(batch_size, -1)
 
+        # ⭐ CRITICAL: normalize embedding for Circle Loss
+        x = F.normalize(x, p=2, dim=1)
+
         # --- Cosine classifier ---
         logits = self.fc(x)
 
