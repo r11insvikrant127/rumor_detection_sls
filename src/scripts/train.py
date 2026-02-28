@@ -47,7 +47,7 @@ class RumorDetectionTrainer:
             self.feature_extractor.get_feature_names()
         )[:31]
 
-        self.threshold = 0.57  # initial value (paper)
+        self.threshold = self.config.gbdt.threshold
 
         print("✅ PAPER EXACT: Using 31 features")
 
@@ -121,7 +121,7 @@ class RumorDetectionTrainer:
         skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
         fold_results = []
-        chosen_thresholds = []
+        
 
         for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), 1):
 
@@ -186,7 +186,7 @@ class RumorDetectionTrainer:
             print("Mean confidence:", max_probs.mean())
 
             # ---------- Threshold Sweep ----------
-            thresholds = np.arange(0.45, 0.66, 0.02)
+            thresholds = [self.threshold]
 
             best_f1 = -1
             best_threshold = self.threshold
@@ -213,7 +213,7 @@ class RumorDetectionTrainer:
                     best_threshold = t
                     best_preds = preds_temp
 
-            chosen_thresholds.append(best_threshold)
+            
 
             print(f"Best threshold fold {fold}: {best_threshold:.2f}")
 
@@ -223,12 +223,11 @@ class RumorDetectionTrainer:
             print(f"Accuracy: {metrics['accuracy']:.4f}")
             print(f"F1:       {metrics['f1']:.4f}")
 
-        # ---------- Global Threshold ----------
-        final_threshold = float(np.mean(chosen_thresholds))
-        self.threshold = final_threshold
+        
+        print(f"\nUsing FIXED global threshold: {self.threshold:.3f}")
 
         print("\n" + "="*60)
-        print(f"GLOBAL THRESHOLD SELECTED: {final_threshold:.3f}")
+        print(f"USING FIXED GLOBAL THRESHOLD: {self.threshold:.3f}")
         print("="*60)
 
         return fold_results
