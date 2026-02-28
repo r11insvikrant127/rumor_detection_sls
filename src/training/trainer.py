@@ -47,8 +47,8 @@ class SLSTrainer:
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode="max",
-            factor=self.config.get("scheduler_factor", 0.5),
-            patience=self.config.get("scheduler_patience", 5),
+            factor=float(self.config.get("scheduler_factor", 0.5)),
+            patience=int(self.config.get("scheduler_patience", 5)),
             verbose=True,
         )
 
