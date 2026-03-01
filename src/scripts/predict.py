@@ -5,7 +5,7 @@ Implements inference exactly as described in the paper:
 1. Extract 31 features
 2. Apply training normalization
 3. Predict using SLS
-4. If max(prob) < 0.634 → use GBDT
+4. If max(prob) < 0.57 → use GBDT
 """
 
 import torch
