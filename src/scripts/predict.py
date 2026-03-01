@@ -5,13 +5,14 @@ Implements inference exactly as described in the paper:
 1. Extract 31 features
 2. Apply training normalization
 3. Predict using SLS
-4. If max(prob) < 0.57 → use GBDT
+4. If max(prob) < 0.634 → use GBDT
 """
 
 import torch
 import numpy as np
 import json
 from pathlib import Path
+from src.utils.config import load_config
 
 from src.preprocessing.feature_extractor import FeatureExtractor
 from src.preprocessing.feature_normalizer import FeatureNormalizer
@@ -28,7 +29,7 @@ class RumorPredictor:
     """Paper-faithful SLS + GBDT prediction pipeline."""
 
     PAPER_FEATURE_DIM = 31
-    PAPER_THRESHOLD = 0.57
+    
 
     def __init__(self, model_dir):
 
@@ -98,7 +99,13 @@ class RumorPredictor:
             self.gbdt = None
             print("⚠️ GBDT not found — SLS only mode")
 
-        self.threshold = self.PAPER_THRESHOLD
+        config_path = Path(__file__).resolve().parents[2] / "configs" / "default.yaml"
+
+        self.config = load_config(str(config_path))
+        self.threshold = self.config.gbdt.threshold
+
+        print(f"📊 Threshold = {self.threshold} (config value)")
+                
 
         print(f"📊 Threshold = {self.threshold} (paper value)")
         print("🎯 Predictor ready")
