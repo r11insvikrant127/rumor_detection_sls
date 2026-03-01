@@ -179,7 +179,7 @@ def evaluate_sls_model(model, test_loader, device='cuda'):
     return metrics
 
 
-def evaluate_sls_model_with_threshold(model, test_loader, threshold=0.634, gbdt_fallback=None, device='cuda'):
+def evaluate_sls_model_with_threshold(model, test_loader, threshold=0.57, gbdt_fallback=None, device='cuda'):
     """
     Evaluate SLS model with uncertainty threshold and optional GBDT fallback.
     All metrics (accuracy, F1, ROC-AUC) are computed using hybrid predictions/probabilities.
@@ -187,7 +187,7 @@ def evaluate_sls_model_with_threshold(model, test_loader, threshold=0.634, gbdt_
     Args:
         model: Trained SLS model
         test_loader: DataLoader with test data
-        threshold: Uncertainty threshold (0.634 as per paper)
+        threshold: Uncertainty threshold (0.57 as per paper)
         gbdt_fallback: Optional GBDT model for uncertain samples
         device: Device to run evaluation on
         
@@ -257,7 +257,7 @@ def evaluate_sls_model_with_threshold(model, test_loader, threshold=0.634, gbdt_
     return metrics
 
 
-def evaluate_hybrid_system(sls_model, gbdt_model, test_loader, threshold=0.634, device='cuda'):
+def evaluate_hybrid_system(sls_model, gbdt_model, test_loader, threshold=0.57, device='cuda'):
     """
     Comprehensive hybrid system evaluation with proper probability handling.
     
@@ -332,7 +332,7 @@ if __name__ == "__main__":
     y_true = y[80:]
     
     # Mock hybrid with threshold
-    threshold = 0.634
+    threshold = 0.57
     uncertain = y_prob_sls < threshold
     
     # GBDT fallback
