@@ -58,7 +58,7 @@ class GBDTWrapper:
             return importances
         return None
     
-    def get_uncertain_indices(self, sls_probs, threshold=0.57):
+    def get_uncertain_indices(self, sls_probs, threshold):
 
         sls_probs = np.asarray(sls_probs)
         if sls_probs.ndim == 2:
