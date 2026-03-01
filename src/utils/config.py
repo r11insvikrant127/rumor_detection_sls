@@ -117,7 +117,7 @@ class GBDTConfig:
     enabled: bool = True
 
     # SINGLE SOURCE OF TRUTH FOR HYBRID THRESHOLD
-    threshold: float = 0.57
+    threshold: float = 0.634
 
     n_estimators: int = 100
     learning_rate: float = 0.1
