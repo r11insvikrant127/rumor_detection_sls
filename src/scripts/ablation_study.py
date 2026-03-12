@@ -63,61 +63,71 @@ class PaperExactAblation:
     # DATA LOADING
     # -------------------------------------------------------
 
-    def load_pheme_data(self,data_dir):
+    def load_pheme_data(self, data_dir):
 
-        events=[]
-
-        data_dir=Path(data_dir)
+        events = []
+        data_dir = Path(data_dir)
 
         for event_dir in data_dir.iterdir():
 
             if not event_dir.is_dir():
                 continue
 
-            for thread_file in event_dir.glob("*.json"):
+            for label_dir in ["rumours", "non-rumours"]:
 
-                try:
+                label_path = event_dir / label_dir
 
-                    with open(thread_file,"r",encoding="utf8") as f:
-                        thread=json.load(f)
-
-                    event={"tweets":[],"label":thread.get("label",0)}
-
-                    if thread.get("source_tweet"):
-
-                        s=thread["source_tweet"]
-
-                        event["tweets"].append({
-                            "id":s.get("id_str",""),
-                            "text":s.get("text",""),
-                            "user":s.get("user",{}),
-                            "created_at":s.get("created_at",""),
-                            "response_to":None
-                        })
-
-                    for r in thread.get("response_tweets",[]):
-
-                        event["tweets"].append({
-                            "id":r.get("id_str",""),
-                            "text":r.get("text",""),
-                            "user":r.get("user",{}),
-                            "created_at":r.get("created_at",""),
-                            "response_to":r.get("in_reply_to_status_id_str")
-                        })
-
-                    label=thread.get("label",0)
-
-                    if isinstance(label,str):
-                        label=1 if label.lower() in ["true","rumour","yes","1"] else 0
-
-                    event["label"]=label
-
-                    events.append(event)
-
-                except:
+                if not label_path.exists():
                     continue
 
-        print("Loaded events:",len(events))
+                for thread_dir in label_path.iterdir():
+
+                    try:
+
+                        event = {"tweets": []}
+
+                        # label
+                        event["label"] = 1 if label_dir == "rumours" else 0
+
+                        # source tweet
+                        source_dir = thread_dir / "source-tweet"
+
+                        for f in source_dir.glob("*.json"):
+                            with open(f) as fp:
+                                s = json.load(fp)
+
+                            event["tweets"].append({
+                                "id": s.get("id_str",""),
+                                "text": s.get("text",""),
+                                "user": s.get("user",{}),
+                                "created_at": s.get("created_at",""),
+                                "response_to": None
+                            })
+
+                        # reactions
+                        reactions_dir = thread_dir / "reactions"
+
+                        if reactions_dir.exists():
+
+                            for f in reactions_dir.glob("*.json"):
+
+                                with open(f) as fp:
+                                    r = json.load(fp)
+
+                                event["tweets"].append({
+                                    "id": r.get("id_str",""),
+                                    "text": r.get("text",""),
+                                    "user": r.get("user",{}),
+                                    "created_at": r.get("created_at",""),
+                                    "response_to": r.get("in_reply_to_status_id_str")
+                                })
+
+                        events.append(event)
+
+                    except:
+                        continue
+
+        print("Loaded events:", len(events))
 
         return events
 
