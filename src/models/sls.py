@@ -3,18 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# ------------------------------------------------------------
-# Cosine Linear Layer (for Circle Loss compatibility)
-# ------------------------------------------------------------
-try:
-    from src.training.loss import CosineLinearLayer
-except ImportError:
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent.parent))
-    from src.training.loss import CosineLinearLayer
-
-
 # ============================================================
 # Separable Convolution Block (Section IV-C)
 # ============================================================
@@ -74,17 +62,20 @@ class SENet(nn.Module):
 
 
 # ============================================================
-# PAPER-EXACT SLS MODEL
+# PAPER-FAITHFUL SLS MODEL
 # ============================================================
 class PaperExactSLS(nn.Module):
     """
-    EXACT SLS architecture from paper (Fig.1).
+    Paper exact architecture from:
+
+    "A Novel and High-Accuracy Rumor Detection Approach
+    using Kernel Subtree and Deep Learning Networks"
 
     Pipeline:
         SeparableConv ×3
         → LSTM
         → SENet
-        → FC + Softmax
+        → FC (Linear classifier)
     """
 
     def __init__(
@@ -122,21 +113,20 @@ class PaperExactSLS(nn.Module):
         )
 
         # --------------------------------------------------
-        # SENet Attention
+        # SENet
         # --------------------------------------------------
         self.senet = SENet(lstm_hidden, se_reduction)
 
         # --------------------------------------------------
-        # Final classifier (Circle Loss compatible)
+        # FINAL CLASSIFIER (Paper uses FC + Softmax)
         # --------------------------------------------------
-        self.fc = CosineLinearLayer(
+        self.fc = nn.Linear(
             in_features=lstm_hidden * input_dim,
-            out_features=num_classes,
-            bias=False,
+            out_features=num_classes
         )
 
     # ========================================================
-    # Forward Pass (PURE SLS — NO HYBRID LOGIC)
+    # Forward Pass
     # ========================================================
     def forward(self, x):
         """
@@ -144,7 +134,7 @@ class PaperExactSLS(nn.Module):
             (batch, 31) or (batch, 1, 31)
 
         Output:
-            cosine similarities (batch, num_classes)
+            logits (batch, num_classes)
         """
 
         if x.dim() == 2:
@@ -154,7 +144,7 @@ class PaperExactSLS(nn.Module):
 
         batch_size = x.size(0)
 
-        # --- Separable Convs ---
+        # --- Separable Convolutions ---
         x = self.sep1(x)
         x = self.sep2(x)
         x = self.sep3(x)
@@ -176,21 +166,15 @@ class PaperExactSLS(nn.Module):
         # --- Flatten ---
         x = x.squeeze(-1).reshape(batch_size, -1)
 
-        # ⭐ CRITICAL: normalize embedding for Circle Loss
-        x = F.normalize(x, p=2, dim=1)
-
-        # --- Cosine classifier ---
+        # --- Linear Classifier ---
         logits = self.fc(x)
 
         return logits
 
     # ========================================================
-    # Probability helper (used by hybrid pipeline)
+    # Probability helper
     # ========================================================
     def predict_proba(self, x):
-        """
-        Returns softmax probabilities.
-        """
         self.eval()
         with torch.no_grad():
             logits = self.forward(x)
@@ -198,7 +182,7 @@ class PaperExactSLS(nn.Module):
         return probs
 
     # ========================================================
-    # Prediction helper (SLS ONLY)
+    # Prediction helper
     # ========================================================
     def predict(self, x):
         probs = self.predict_proba(x)
@@ -213,7 +197,7 @@ class PaperExactSLS(nn.Module):
 
         return {
             "architecture":
-                "SeparableConv(3,5,7) → LSTM → SENet → CosineLinear",
+                "SeparableConv(3,5,7) → LSTM → SENet → Linear → Softmax",
             "input_dim": self.input_dim,
             "lstm_hidden": self.lstm_hidden,
             "params_total": total,
