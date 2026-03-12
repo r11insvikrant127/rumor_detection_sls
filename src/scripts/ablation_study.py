@@ -4,8 +4,11 @@ Reproduces Section V-D, Fig.4 and Fig.5 exactly.
 """
 
 import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+
+# Add project root to Python path
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(ROOT))
 
 import numpy as np
 import pandas as pd
