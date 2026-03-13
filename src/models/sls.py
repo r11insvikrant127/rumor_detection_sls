@@ -88,7 +88,8 @@ class PaperExactSLS(nn.Module):
     ):
         super().__init__()
 
-        assert input_dim == 31, "Paper uses exactly 31 features."
+        # Allow ablation studies with different feature counts
+        assert input_dim > 0, "Input dimension must be positive."
 
         self.input_dim = input_dim
         self.lstm_hidden = lstm_hidden
