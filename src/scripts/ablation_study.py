@@ -60,12 +60,7 @@ class PaperExactAblation:
 
     def load_pheme_data(self, data_dir):
 
-        # Use the same index file as train.py
         index_file = Path(data_dir) / "pheme_dataset_index.csv"
-
-        if not index_file.exists():
-            raise FileNotFoundError(f"Index file not found: {index_file}")
-
         df = pd.read_csv(index_file)
 
         events = []
@@ -73,11 +68,7 @@ class PaperExactAblation:
         for _, row in df.iterrows():
 
             try:
-                # Resolve path relative to project root if needed
                 thread_path = Path(row["file_path"])
-
-                if not thread_path.is_absolute():
-                    thread_path = Path(data_dir).parents[1] / thread_path
 
                 if not thread_path.exists():
                     continue
@@ -85,21 +76,16 @@ class PaperExactAblation:
                 with open(thread_path, encoding="utf-8") as f:
                     thread = json.load(f)
 
-                # Get tweets list
-                tweets = thread.get("tweets", [])
-
-                if len(tweets) == 0:
+                # TRAIN.PY FORMAT
+                if "source" not in thread:
                     continue
 
-                # Identify source tweet
-                source_id = None
-                for t in tweets:
-                    if t.get("response_to") is None:
-                        source_id = str(t["id"])
-                        break
+                tweets = [thread["source"]]
 
-                if source_id is None:
-                    continue
+                if "replies" in thread:
+                    tweets.extend(thread["replies"])
+
+                source_id = str(thread["source"]["id"])
 
                 event = {
                     "label": int(row["label"]),
