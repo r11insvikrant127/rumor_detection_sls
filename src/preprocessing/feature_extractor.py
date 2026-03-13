@@ -221,7 +221,7 @@ class FeatureExtractor:
             len(ents.get("user_mentions", [])) / kernel_size,
             sentiment(text),
 
-            mean([len(t.split()) for t in texts]),
+            mean([len(t) for t in texts]),
             mean([sentiment(t) for t in texts]),
             mean([
                 any(p in t for p in self.ENQUIRY_PATTERNS)
