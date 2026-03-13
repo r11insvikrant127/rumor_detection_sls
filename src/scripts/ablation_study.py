@@ -60,73 +60,48 @@ class PaperExactAblation:
 
     def load_pheme_data(self, data_dir):
 
+        index_file = Path(data_dir).parent / "pheme_dataset_index.csv"
+        df = pd.read_csv(index_file)
+
         events = []
-        data_dir = Path(data_dir)
 
-        for event_dir in data_dir.iterdir():
+        for _, row in df.iterrows():
 
-            if not event_dir.is_dir():
-                continue
+            try:
 
-            for label_dir in ["rumours","non-rumours"]:
+                thread_path = Path(row["file_path"])
 
-                label_path = event_dir / label_dir
-
-                if not label_path.exists():
+                if not thread_path.exists():
                     continue
 
-                for thread_dir in label_path.iterdir():
+                with open(thread_path, encoding="utf-8") as f:
+                    thread = json.load(f)
 
-                    try:
+                tweets = thread["tweets"]
 
-                        event = {"tweets":[]}
-                        event["label"] = 1 if label_dir=="rumours" else 0
+                source_id = None
+                for t in tweets:
+                    if t.get("response_to") is None:
+                        source_id = str(t["id"])
+                        break
 
-                        # source tweet
-                        source_dir = thread_dir / "source-tweet"
+                if source_id is None:
+                    continue
 
-                        for f in source_dir.glob("*.json"):
-                            with open(f) as fp:
-                                s = json.load(fp)
+                event = {
+                    "label": int(row["label"]),
+                    "source_id": source_id,
+                    "tweets": tweets
+                }
 
-                            source_id = s.get("id_str","")
+                events.append(event)
 
-                            event["source_id"] = source_id   # ⭐ IMPORTANT
+            except Exception as err:
+                print("Skipping:", err)
 
-                            event["tweets"].append({
-                                "id": source_id,
-                                "text": s.get("text",""),
-                                "user": s.get("user",{}),
-                                "created_at": s.get("created_at",""),
-                                "response_to": None
-                            })
+        print("Loaded events:", len(events))
 
-                        # reactions
-                        reactions_dir = thread_dir / "reactions"
-
-                        if reactions_dir.exists():
-
-                            for f in reactions_dir.glob("*.json"):
-
-                                with open(f) as fp:
-                                    r = json.load(fp)
-
-                                event["tweets"].append({
-                                    "id":r.get("id_str",""),
-                                    "text":r.get("text",""),
-                                    "user":r.get("user",{}),
-                                    "created_at":r.get("created_at",""),
-                                    "response_to":r.get("in_reply_to_status_id_str") or source_id
-                                })
-
-                        events.append(event)
-
-                    except:
-                        continue
-
-        print("Loaded events:",len(events))
         return events
-
 
     # -------------------------------------------------------
     # FEATURE EXTRACTION
