@@ -183,7 +183,7 @@ class PaperExactAblation:
             add_channel_dim=True
         )
 
-        trainer.train(train_loader,val_loader,epochs=100)
+        trainer.train(train_loader, val_loader)
 
         model.eval()
 
@@ -256,6 +256,7 @@ class PaperExactAblation:
                     acc = (preds[confident] == y_val[confident]).mean()
 
                     fold_acc.append(acc)
+                threshold_acc.append(np.mean(fold_acc))
 
             results[name]=threshold_acc
 
