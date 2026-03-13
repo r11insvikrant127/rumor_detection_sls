@@ -76,7 +76,18 @@ class PaperExactAblation:
                 with open(thread_path, encoding="utf-8") as f:
                     thread = json.load(f)
 
-                # attach label from index
+                # Skip if source missing
+                if "source" not in thread or thread["source"] is None:
+                    continue
+
+                # EXACT format used in train.py
+                tweets = [thread["source"]]
+
+                if "replies" in thread:
+                    tweets.extend(thread["replies"])
+
+                thread["tweets"] = tweets
+                thread["source_id"] = str(thread["source"]["id"])
                 thread["label"] = int(row["label"])
 
                 events.append(thread)
