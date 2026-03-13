@@ -76,24 +76,10 @@ class PaperExactAblation:
                 with open(thread_path, encoding="utf-8") as f:
                     thread = json.load(f)
 
-                # TRAIN.PY FORMAT
-                if "source" not in thread:
-                    continue
+                # attach label from index
+                thread["label"] = int(row["label"])
 
-                tweets = [thread["source"]]
-
-                if "replies" in thread:
-                    tweets.extend(thread["replies"])
-
-                source_id = str(thread["source"]["id"])
-
-                event = {
-                    "label": int(row["label"]),
-                    "source_id": source_id,
-                    "tweets": tweets
-                }
-
-                events.append(event)
+                events.append(thread)
 
             except Exception as err:
                 print("Skipping:", err)
