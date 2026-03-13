@@ -6,7 +6,6 @@ Reproduces Section V-D, Fig.4 and Fig.5 exactly.
 import sys
 from pathlib import Path
 
-# Add project root to Python path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT))
 
@@ -16,7 +15,6 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import StratifiedKFold
 import torch
 import json
-from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -34,26 +32,23 @@ class PaperExactAblation:
     def __init__(self, config_path):
 
         self.config = ConfigManager(config_path)
-
         set_seed(42)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.feature_extractor = FeatureExtractor()
-
         all_features = self.feature_extractor.get_feature_names()
 
         # Paper uses exactly 31 features
         self.feature_names = all_features[:31]
 
-        # Table I feature groups
+        # Feature groups (Table I)
         self.feature_groups = {
             "propagation": list(range(0,6)),
             "user": list(range(6,19)),
             "content": list(range(19,31))
         }
 
-        # Threshold range used in paper
         self.thresholds_fig4 = np.arange(0.52,0.66,0.01)
         self.thresholds_fig5 = np.arange(0.55,0.81,0.01)
 
@@ -73,7 +68,7 @@ class PaperExactAblation:
             if not event_dir.is_dir():
                 continue
 
-            for label_dir in ["rumours", "non-rumours"]:
+            for label_dir in ["rumours","non-rumours"]:
 
                 label_path = event_dir / label_dir
 
@@ -84,10 +79,8 @@ class PaperExactAblation:
 
                     try:
 
-                        event = {"tweets": []}
-
-                        # label
-                        event["label"] = 1 if label_dir == "rumours" else 0
+                        event = {"tweets":[]}
+                        event["label"] = 1 if label_dir=="rumours" else 0
 
                         # source tweet
                         source_dir = thread_dir / "source-tweet"
@@ -97,11 +90,11 @@ class PaperExactAblation:
                                 s = json.load(fp)
 
                             event["tweets"].append({
-                                "id": s.get("id_str",""),
-                                "text": s.get("text",""),
-                                "user": s.get("user",{}),
-                                "created_at": s.get("created_at",""),
-                                "response_to": None
+                                "id":s.get("id_str",""),
+                                "text":s.get("text",""),
+                                "user":s.get("user",{}),
+                                "created_at":s.get("created_at",""),
+                                "response_to":None
                             })
 
                         # reactions
@@ -115,11 +108,11 @@ class PaperExactAblation:
                                     r = json.load(fp)
 
                                 event["tweets"].append({
-                                    "id": r.get("id_str",""),
-                                    "text": r.get("text",""),
-                                    "user": r.get("user",{}),
-                                    "created_at": r.get("created_at",""),
-                                    "response_to": r.get("in_reply_to_status_id_str")
+                                    "id":r.get("id_str",""),
+                                    "text":r.get("text",""),
+                                    "user":r.get("user",{}),
+                                    "created_at":r.get("created_at",""),
+                                    "response_to":r.get("in_reply_to_status_id_str")
                                 })
 
                         events.append(event)
@@ -127,8 +120,7 @@ class PaperExactAblation:
                     except:
                         continue
 
-        print("Loaded events:", len(events))
-
+        print("Loaded events:",len(events))
         return events
 
 
@@ -147,10 +139,10 @@ class PaperExactAblation:
 
                 feats=self.feature_extractor.extract_features(e)
 
-                if len(feats)>=31:
+                vec=[feats[name] for name in self.feature_names]
 
-                    X.append(feats[:31])
-                    y.append(e["label"])
+                X.append(vec)
+                y.append(e["label"])
 
             except:
                 pass
@@ -159,6 +151,8 @@ class PaperExactAblation:
         y=np.array(y)
 
         X=np.nan_to_num(X)
+
+        print("Feature matrix shape:",X.shape)
 
         return X,y
 
@@ -227,7 +221,7 @@ class PaperExactAblation:
 
 
     # -------------------------------------------------------
-    # FIGURE 4 (Feature type ablation)
+    # FIGURE 4
     # -------------------------------------------------------
 
     def compute_fig4(self):
@@ -245,7 +239,8 @@ class PaperExactAblation:
 
         for name,idx in models.items():
 
-            fold_acc=[]
+            fold_probs=[]
+            fold_labels=[]
 
             for train_idx,val_idx in self.splits:
 
@@ -261,22 +256,41 @@ class PaperExactAblation:
                     len(idx)
                 )
 
-                preds=np.argmax(probs,axis=1)
+                fold_probs.append(probs)
+                fold_labels.append(y_val)
 
-                acc=(preds==y_val).mean()
+            threshold_acc=[]
 
-                fold_acc.append(acc)
+            for t in self.thresholds_fig4:
 
-            mean_acc=np.mean(fold_acc)
+                fold_acc=[]
 
-            # replicate constant accuracy across thresholds
-            results[name] = [mean_acc]*len(self.thresholds_fig4)
+                for probs,y_val in zip(fold_probs,fold_labels):
+
+                    max_probs=np.max(probs,axis=1)
+                    preds=np.argmax(probs,axis=1)
+
+                    confident=max_probs>=t
+
+                    if confident.sum()==0:
+                        continue
+
+                    acc=(preds[confident]==y_val[confident]).mean()
+
+                    fold_acc.append(acc)
+
+                if len(fold_acc)>0:
+                    threshold_acc.append(np.mean(fold_acc))
+                else:
+                    threshold_acc.append(0)
+
+            results[name]=threshold_acc
 
         self.results["fig4"]=results
 
 
     # -------------------------------------------------------
-    # FIGURE 5 (GBDT assistance study)
+    # FIGURE 5
     # -------------------------------------------------------
 
     def compute_fig5(self):
@@ -353,8 +367,8 @@ class PaperExactAblation:
 
         plt.figure(figsize=(8,5))
 
-        plt.plot(self.thresholds_fig5, df["sls_minus_acc"], marker="o", label="SLS-")
-        plt.plot(self.thresholds_fig5, df["gbdt_acc"], marker="o", label="GBDT")
+        plt.plot(df.index,df["sls_minus_acc"],marker="o",label="SLS-")
+        plt.plot(df.index,df["gbdt_acc"],marker="o",label="GBDT")
 
         plt.xlabel("Threshold")
         plt.ylabel("Accuracy")
@@ -366,7 +380,7 @@ class PaperExactAblation:
 
 
     # -------------------------------------------------------
-    # RUN FULL ABLATION
+    # RUN
     # -------------------------------------------------------
 
     def run(self):
