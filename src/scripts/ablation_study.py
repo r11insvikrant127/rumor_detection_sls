@@ -112,9 +112,9 @@ class PaperExactAblation:
 
             try:
 
-                feats=self.feature_extractor.extract_features(e)
+                feats = self.feature_extractor.extract_features(e)
 
-                vec=[feats[name] for name in self.feature_names]
+                vec = feats[:31]
 
                 X.append(vec)
                 y.append(e["label"])
