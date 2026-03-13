@@ -60,7 +60,7 @@ class PaperExactAblation:
 
     def load_pheme_data(self, data_dir):
 
-        index_file = Path(data_dir).parent / "pheme_dataset_index.csv"
+        index_file = Path(data_dir) / "pheme_dataset_index.csv"
         df = pd.read_csv(index_file)
 
         events = []
