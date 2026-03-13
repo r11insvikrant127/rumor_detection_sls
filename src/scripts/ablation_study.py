@@ -49,8 +49,8 @@ class PaperExactAblation:
             "content": list(range(19,31))
         }
 
-        self.thresholds_fig4 = np.arange(0.52,0.66,0.01)
-        self.thresholds_fig5 = np.arange(0.55,0.81,0.01)
+        self.thresholds_fig4 = np.round(np.arange(0.52,0.66,0.01),2)
+        self.thresholds_fig5 = np.round(np.arange(0.55,0.81,0.01),2)
 
         self.results = {}
 
@@ -89,12 +89,16 @@ class PaperExactAblation:
                             with open(f) as fp:
                                 s = json.load(fp)
 
+                            source_id = s.get("id_str","")
+
+                            event["source_id"] = source_id   # ⭐ IMPORTANT
+
                             event["tweets"].append({
-                                "id":s.get("id_str",""),
-                                "text":s.get("text",""),
-                                "user":s.get("user",{}),
-                                "created_at":s.get("created_at",""),
-                                "response_to":None
+                                "id": source_id,
+                                "text": s.get("text",""),
+                                "user": s.get("user",{}),
+                                "created_at": s.get("created_at",""),
+                                "response_to": None
                             })
 
                         # reactions
@@ -112,7 +116,7 @@ class PaperExactAblation:
                                     "text":r.get("text",""),
                                     "user":r.get("user",{}),
                                     "created_at":r.get("created_at",""),
-                                    "response_to":r.get("in_reply_to_status_id_str")
+                                    "response_to":r.get("in_reply_to_status_id_str") or source_id
                                 })
 
                         events.append(event)
@@ -144,11 +148,14 @@ class PaperExactAblation:
                 X.append(vec)
                 y.append(e["label"])
 
-            except:
-                pass
+            except Exception as err:
+                print("Feature extraction failed:", err)
+                continue
 
         X=np.array(X,dtype=np.float32)
         y=np.array(y)
+        if len(X) == 0:
+            raise ValueError("No features extracted. FeatureExtractor is failing for all events.")
 
         X=np.nan_to_num(X)
 
@@ -267,22 +274,17 @@ class PaperExactAblation:
 
                 for probs,y_val in zip(fold_probs,fold_labels):
 
-                    max_probs=np.max(probs,axis=1)
-                    preds=np.argmax(probs,axis=1)
+                    max_probs = np.max(probs, axis=1)
+                    preds = np.argmax(probs, axis=1)
 
-                    confident=max_probs>=t
+                    confident = max_probs >= t
 
-                    if confident.sum()==0:
+                    if confident.sum() == 0:
                         continue
 
-                    acc=(preds[confident]==y_val[confident]).mean()
+                    acc = (preds[confident] == y_val[confident]).mean()
 
                     fold_acc.append(acc)
-
-                if len(fold_acc)>0:
-                    threshold_acc.append(np.mean(fold_acc))
-                else:
-                    threshold_acc.append(0)
 
             results[name]=threshold_acc
 
