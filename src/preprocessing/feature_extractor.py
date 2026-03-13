@@ -4,6 +4,7 @@ from textblob import TextBlob
 
 from .tree_builder import TreeBuilder
 from .kernel_subtree import KernelSubtreeExtractor
+from datetime import datetime
 
 
 class FeatureExtractor:
@@ -66,6 +67,22 @@ class FeatureExtractor:
         self.tree_builder = TreeBuilder()
         self.kernel_extractor = KernelSubtreeExtractor()
 
+    def _account_age_days(self, tweet):
+        user = tweet.get("user", {})
+
+        tweet_time = tweet.get("created_at")
+        user_time = user.get("created_at")
+
+        if not tweet_time or not user_time:
+            return 0.0
+
+        try:
+            tweet_dt = datetime.strptime(tweet_time, "%a %b %d %H:%M:%S %z %Y")
+            user_dt = datetime.strptime(user_time, "%a %b %d %H:%M:%S %z %Y")
+            return float((tweet_dt - user_dt).days)
+        except Exception:
+            return 0.0
+        
     def get_feature_names(self):
         return self.FEATURE_NAMES
 
@@ -136,7 +153,8 @@ class FeatureExtractor:
         ]
 
         influential = next(
-            t for t in tweets if str(t["id"]) == str(max_node)
+            (t for t in tweets if str(t["id"]) == str(max_node)),
+            tweets[0]
         )
 
         user = influential.get("user", {})
@@ -149,18 +167,21 @@ class FeatureExtractor:
             return float(np.mean(lst)) if lst else 0.0
 
         features = [
-            float(user.get("account_age_days", 0)),
+            self._account_age_days(influential),
             followers,
             float(user.get("statuses_count", 0)),
             reposts / max(followers, 1),
             favorites / max(followers, 1),
 
-            mean([0 if t["user"].get("default_profile_image") else 1 for t in kernel_tweets]),
-            mean([1 if t["user"].get("verified") else 0 for t in kernel_tweets]),
-            mean([t["user"].get("account_age_days", 0) for t in kernel_tweets]),
-            mean([t["user"].get("friends_count", 0) for t in kernel_tweets]),
-            mean([t["user"].get("followers_count", 0) for t in kernel_tweets]),
-            mean([t["user"].get("statuses_count", 0) for t in kernel_tweets]),
+            mean([
+                0 if t.get("user", {}).get("default_profile_image") else 1
+                for t in kernel_tweets
+            ]),
+            mean([1 if t.get("user", {}).get("verified") else 0 for t in kernel_tweets]),
+            mean([self._account_age_days(t) for t in kernel_tweets]),
+            mean([t.get("user", {}).get("friends_count", 0) for t in kernel_tweets]),
+            mean([t.get("user", {}).get("followers_count", 0) for t in kernel_tweets]),
+            mean([t.get("user", {}).get("statuses_count", 0) for t in kernel_tweets]),
             mean([t.get("retweet_count", 0) for t in kernel_tweets]),
             mean([t.get("favorite_count", 0) for t in kernel_tweets]),
         ]
@@ -178,7 +199,8 @@ class FeatureExtractor:
         ]
 
         influential = next(
-            t for t in tweets if str(t["id"]) == str(max_node)
+            (t for t in tweets if str(t["id"]) == str(max_node)),
+            tweets[0]
         )
 
         def sentiment(text):
@@ -202,7 +224,7 @@ class FeatureExtractor:
             mean([len(t.split()) for t in texts]),
             mean([sentiment(t) for t in texts]),
             mean([
-                ("?" in t) or any(p in t for p in self.ENQUIRY_PATTERNS)
+                any(p in t for p in self.ENQUIRY_PATTERNS)
                 for t in texts
             ]),
             mean([bool(t.get("entities", {}).get("hashtags")) for t in kernel_tweets]),
