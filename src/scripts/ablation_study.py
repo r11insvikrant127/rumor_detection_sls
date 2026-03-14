@@ -331,7 +331,7 @@ class PaperExactAblation:
         plt.title("Fig.4 Feature Ablation")
         plt.legend()
         plt.grid()
-
+        plt.savefig("fig4_feature_ablation.png", dpi=300)
         plt.show()
 
 
@@ -349,7 +349,7 @@ class PaperExactAblation:
         plt.title("Fig.5 GBDT Assistance Analysis")
         plt.legend()
         plt.grid()
-
+        plt.savefig("fig5_feature_ablation.png", dpi=300)
         plt.show()
 
 
