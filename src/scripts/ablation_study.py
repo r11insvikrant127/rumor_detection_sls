@@ -185,15 +185,11 @@ class PaperExactAblation:
 
         trainer.train(train_loader, val_loader)
 
-        model.eval()
-
         with torch.no_grad():
 
-            X_tensor=torch.FloatTensor(X_val).unsqueeze(1).to(self.device)
+            _, prob_class1 = trainer.predict(X_val, return_probs=True)
 
-            outputs=model(X_tensor)
-
-            probs=torch.softmax(outputs,dim=1).cpu().numpy()
+            probs = np.stack([1 - prob_class1, prob_class1], axis=1)
 
         return probs
 
@@ -286,7 +282,11 @@ class PaperExactAblation:
             sls_preds=np.argmax(probs,axis=1)
             max_probs=np.max(probs,axis=1)
 
-            gbdt=GBDTWrapper(**self.config.gbdt.__dict__)
+            gbdt = GBDTWrapper(
+                n_estimators=self.config.gbdt.n_estimators,
+                learning_rate=self.config.gbdt.learning_rate,
+                max_depth=self.config.gbdt.max_depth
+            )
             gbdt.fit(X_train,y_train)
 
             gbdt_preds=gbdt.predict(X_val)
