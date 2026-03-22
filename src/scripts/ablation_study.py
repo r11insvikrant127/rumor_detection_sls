@@ -255,6 +255,7 @@ class PaperExactAblation:
                     confident = max_probs >= t
 
                     if confident.sum() == 0:
+                        fold_acc.append(np.nan)
                         continue
 
                     acc = (preds[confident] == y_val[confident]).mean()
@@ -262,7 +263,7 @@ class PaperExactAblation:
 
                 # ✅ Safe mean
                 if len(fold_acc) > 0:
-                    threshold_acc.append(np.mean(fold_acc))
+                    threshold_acc.append(np.nanmean(fold_acc))
                 else:
                     threshold_acc.append(np.nan)
 
