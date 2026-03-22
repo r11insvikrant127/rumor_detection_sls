@@ -128,7 +128,7 @@ class RumorPredictor:
     # Hybrid Decision (Paper Logic)
     # ------------------------------------------------------------
 
-    def hybrid_decision(self, sls_probs, features_norm):
+    def hybrid_decision(self, sls_probs, features_raw, features_norm):
 
         sls_pred = np.argmax(sls_probs)
         max_prob = np.max(sls_probs)
@@ -136,8 +136,8 @@ class RumorPredictor:
         # Paper rule
         if max_prob < self.threshold and self.gbdt is not None:
 
-            gbdt_pred = self.gbdt.predict(features_norm)[0]
-            gbdt_probs = self.gbdt.predict_proba(features_norm)[0]
+            gbdt_pred = self.gbdt.predict(features_raw)[0]
+            gbdt_probs = self.gbdt.predict_proba(features_raw)[0]
 
             return {
                 "prediction": int(gbdt_pred),
@@ -186,7 +186,7 @@ class RumorPredictor:
 
         sls_probs = probs[0].cpu().numpy()
 
-        result = self.hybrid_decision(sls_probs, features_norm)
+        result = self.hybrid_decision(sls_probs, features, features_norm)
 
         result["prediction"] = (
             "rumor" if result["prediction"] == 1 else "non-rumor"
