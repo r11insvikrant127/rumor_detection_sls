@@ -276,9 +276,11 @@ class RumorDetectionTrainer:
             )
 
             # -------- GBDT --------
+            print("🌳 Training GBDT...")
             gbdt = GradientBoostingClassifier(random_state=42)
             gbdt.fit(X_train_raw, y_train)
 
+            print("🔮 SLS inference...")
             preds_sls, probs_sls = trainer.predict(X_val, return_probs=True)
             max_probs = probs_sls.max(axis=1)
 
@@ -305,18 +307,21 @@ class RumorDetectionTrainer:
             )
 
             # -------- Classical --------
+            print("🌲 Training Decision Tree...")
             dtc = DecisionTreeClassifier(random_state=42)
             dtc.fit(X_train_raw, y_train)
             all_model_results["DTC"].append(
                 Evaluator.compute_metrics(y_val, dtc.predict(X_val_raw))
             )
 
-            svm_rbf = SVC(kernel="rbf")
+            print("⚡ Training SVM-RBF...")
+            svm_rbf = SVC(kernel="rbf", max_iter=2000)
             svm_rbf.fit(X_train_raw, y_train)
             all_model_results["SVM-RBF"].append(
                 Evaluator.compute_metrics(y_val, svm_rbf.predict(X_val_raw))
             )
 
+            print("⚡ Training SVM-TS...")
             svm_ts = SVC(kernel="linear")
             svm_ts.fit(X_train_raw, y_train)
             all_model_results["SVM-TS"].append(
