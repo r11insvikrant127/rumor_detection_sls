@@ -315,7 +315,7 @@ class RumorDetectionTrainer:
             )
 
             print("⚡ Training SVM-RBF...")
-            svm_rbf = SVC(kernel="rbf", max_iter=2000)
+            svm_rbf = SVC(kernel="rbf", max_iter=5000)
             svm_rbf.fit(X_train_raw, y_train)
             all_model_results["SVM-RBF"].append(
                 Evaluator.compute_metrics(y_val, svm_rbf.predict(X_val_raw))
