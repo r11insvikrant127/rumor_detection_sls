@@ -104,10 +104,7 @@ class RumorPredictor:
         self.config = load_config(str(config_path))
         self.threshold = self.config.gbdt.threshold
 
-        print(f"📊 Threshold = {self.threshold} (config value)")
-                
-
-        print(f"📊 Threshold = {self.threshold} (paper value)")
+        print(f"📊 Threshold = {self.threshold}")
         print("🎯 Predictor ready")
 
     # ------------------------------------------------------------
@@ -179,12 +176,13 @@ class RumorPredictor:
 
         # SLS inference
         with torch.no_grad():
-            tensor = torch.FloatTensor(features_norm)\
+            tensor = torch.tensor(features_norm, dtype=torch.float32)\
                 .unsqueeze(1)\
                 .to(self.device)
 
             outputs = self.model(tensor)
-            probs = torch.softmax(outputs, dim=1)
+            temperature = getattr(self.config, "temperature", 1.0) #you used temperature in predict() in trainer.py
+            probs = torch.softmax(outputs / temperature, dim=1)
 
         sls_probs = probs[0].cpu().numpy()
 

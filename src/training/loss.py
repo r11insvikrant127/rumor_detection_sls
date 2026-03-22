@@ -4,72 +4,52 @@ import torch.nn.functional as F
 
 
 class CircleLoss(nn.Module):
-    """
-    Circle Loss implementation used in the SLS paper.
-
-    Paper statement:
-    "Cross-entropy loss is replaced by Circle Loss."
-
-    This implementation works directly with the logits produced
-    by the final Linear classifier of the SLS model.
-
-    Hyperparameters (paper settings):
-        m = 0.25
-        gamma = 256
-    """
-
-    def __init__(self, m: float = 0.25, gamma: float = 256, reduction: str = "mean"):
+    def __init__(
+        self,
+        m: float = 0.25,
+        gamma: float = 256,
+        reduction: str = "mean"
+    ):
         super().__init__()
 
         self.m = m
         self.gamma = gamma
         self.reduction = reduction
 
-    def forward(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """
-        Args
-        ----
-        logits : Tensor (B, C)
-            Output of final Linear layer
+    def forward(self, similarities: torch.Tensor, labels: torch.Tensor):
 
-        labels : Tensor (B,)
-            Ground truth labels
+        # One-hot encoding
+        one_hot = F.one_hot(labels, num_classes=similarities.size(1)).float()
 
-        Returns
-        -------
-        loss : Tensor
-        """
-
-        # One-hot labels
-        one_hot = F.one_hot(labels, num_classes=logits.size(1)).float()
-
-        # Positive similarities
-        sp = (logits * one_hot).sum(dim=1)
+        # Positive similarity
+        sp = torch.sum(similarities * one_hot, dim=1)
 
         # Negative similarities
-        sn = logits * (1 - one_hot)
+        sn = similarities[one_hot == 0].view(similarities.size(0), -1)
 
-        # Adaptive weighting
-        ap = torch.clamp_min(1 + self.m - sp.detach(), 0.)
-        an = torch.clamp_min(sn.detach() + self.m, 0.)
+        # Adaptive weights
+        ap = torch.clamp_min(1 + self.m - sp.detach(), 0.0)
+        an = torch.clamp_min(sn.detach() + self.m, 0.0)
 
+        # Margins
         delta_p = 1 - self.m
         delta_n = self.m
 
+        # Logits transformation
         logit_p = -self.gamma * ap * (sp - delta_p)
         logit_n = self.gamma * an * (sn - delta_n)
 
+        # Final loss
         loss = F.softplus(
             torch.logsumexp(logit_n, dim=1) + logit_p
         )
 
         if self.reduction == "mean":
             return loss.mean()
-
-        if self.reduction == "sum":
+        elif self.reduction == "sum":
             return loss.sum()
-
-        return loss
+        else:
+            return loss
 
 
 def create_circle_loss(
@@ -77,41 +57,39 @@ def create_circle_loss(
     gamma: float = 256,
     reduction: str = "mean"
 ) -> CircleLoss:
-    """
-    Factory function for Circle Loss using paper parameters.
-    """
-
-    return CircleLoss(
-        m=m,
-        gamma=gamma,
-        reduction=reduction
-    )
+    return CircleLoss(m, gamma, reduction)
 
 
 # ============================================================
-# Quick Test
+# Test
 # ============================================================
 
 def test_circle_loss():
     print("=" * 60)
-    print("Testing Circle Loss (Paper Faithful)")
+    print("Testing Circle Loss (Correct Simulation)")
     print("=" * 60)
 
-    batch_size = 8
-    num_classes = 2
+    B, C, D = 8, 2, 128
 
-    logits = torch.randn(batch_size, num_classes)
-    labels = torch.randint(0, num_classes, (batch_size,))
+    # Simulate normalized features
+    x = torch.randn(B, D)
+    x = F.normalize(x, dim=1)
+
+    # Simulate normalized class weights
+    W = torch.randn(C, D)
+    W = F.normalize(W, dim=1)
+
+    # Cosine similarity
+    similarity = x @ W.T
+
+    labels = torch.randint(0, C, (B,))
 
     loss_fn = create_circle_loss()
 
-    loss = loss_fn(logits, labels)
+    loss = loss_fn(similarity, labels)
 
-    print("Logits shape:", logits.shape)
-    print("Labels shape:", labels.shape)
     print("Loss:", loss.item())
-
-    print("\n✓ Circle Loss working correctly")
+    print("✓ Works correctly")
 
 
 if __name__ == "__main__":

@@ -47,10 +47,12 @@ class SENet(nn.Module):
 
         self.pool = nn.AdaptiveAvgPool2d(1)
 
+        reduced = max(channels // reduction, 1)
+
         self.fc = nn.Sequential(
-            nn.Linear(channels, channels // reduction, bias=False),
+            nn.Linear(channels, reduced, bias=False),
             nn.ReLU(inplace=True),
-            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Linear(reduced, channels, bias=False),
             nn.Sigmoid(),
         )
 
@@ -65,19 +67,6 @@ class SENet(nn.Module):
 # PAPER-FAITHFUL SLS MODEL
 # ============================================================
 class PaperExactSLS(nn.Module):
-    """
-    Paper exact architecture from:
-
-    "A Novel and High-Accuracy Rumor Detection Approach
-    using Kernel Subtree and Deep Learning Networks"
-
-    Pipeline:
-        SeparableConv ×3
-        → LSTM
-        → SENet
-        → FC (Linear classifier)
-    """
-
     def __init__(
         self,
         input_dim=31,
@@ -123,20 +112,14 @@ class PaperExactSLS(nn.Module):
         # --------------------------------------------------
         self.fc = nn.Linear(
             in_features=lstm_hidden * input_dim,
-            out_features=num_classes
+            out_features=num_classes,
+            bias=False
         )
 
     # ========================================================
     # Forward Pass
     # ========================================================
     def forward(self, x):
-        """
-        Input:
-            (batch, 31) or (batch, 1, 31)
-
-        Output:
-            logits (batch, num_classes)
-        """
 
         if x.dim() == 2:
             x = x.unsqueeze(1)
@@ -167,19 +150,21 @@ class PaperExactSLS(nn.Module):
         # --- Flatten ---
         x = x.squeeze(-1).reshape(batch_size, -1)
 
-        # --- Linear Classifier ---
-        logits = self.fc(x)
+        # --- Cosine classifier for Circle Loss ---
+        x = F.normalize(x, dim=1)
+        weight = F.normalize(self.fc.weight, dim=1)
 
-        return logits
+        similarities = F.linear(x, weight)
 
+        return similarities
     # ========================================================
     # Probability helper
     # ========================================================
     def predict_proba(self, x):
         self.eval()
         with torch.no_grad():
-            logits = self.forward(x)
-            probs = F.softmax(logits, dim=1)
+            similarities = self.forward(x)
+            probs = F.softmax(similarities, dim=1)
         return probs
 
     # ========================================================

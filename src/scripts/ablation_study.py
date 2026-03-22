@@ -187,59 +187,67 @@ class PaperExactAblation:
 
         with torch.no_grad():
 
-            _, prob_class1 = trainer.predict(X_val, return_probs=True)
-
-            probs = np.stack([1 - prob_class1, prob_class1], axis=1)
+            _, probs = trainer.predict(X_val, return_probs=True)
 
         return probs
-
-
+    
     # -------------------------------------------------------
     # FIGURE 4
     # -------------------------------------------------------
+
 
     def compute_fig4(self):
 
         print("\nRunning Fig4 reproduction")
 
-        models={
-            "pSLS":self.feature_groups["propagation"],
-            "uSLS":self.feature_groups["user"],
-            "cSLS":self.feature_groups["content"],
-            "SLS":list(range(31))
+        models = {
+            "pSLS": self.feature_groups["propagation"],
+            "uSLS": self.feature_groups["user"],
+            "cSLS": self.feature_groups["content"],
+            "SLS": list(range(31))
         }
 
-        results={}
+        results = {}
 
-        for name,idx in models.items():
+        for name, idx in models.items():
 
-            fold_probs=[]
-            fold_labels=[]
+            fold_probs = []
+            fold_labels = []
 
-            for train_idx,val_idx in self.splits:
+            for train_idx, val_idx in self.splits:
 
-                X_train=self.X[train_idx][:,idx]
-                y_train=self.y[train_idx]
+                # ---- 1. Select subset FIRST ----
+                X_train = self.X[train_idx][:, idx]
+                y_train = self.y[train_idx]
 
-                X_val=self.X[val_idx][:,idx]
-                y_val=self.y[val_idx]
+                X_val = self.X[val_idx][:, idx]
+                y_val = self.y[val_idx]
 
-                probs=self.train_sls(
-                    X_train,y_train,
-                    X_val,y_val,
+                # ---- 2. Get correct feature names ----
+                selected_features = [self.feature_names[i] for i in idx]
+                
+                # ---- 3. Normalize per fold ----
+                normalizer = FeatureNormalizer()
+                X_train = normalizer.fit_transform(X_train, selected_features)
+                X_val = normalizer.transform(X_val)
+            
+                # ---- 4. Train + predict ----
+                probs = self.train_sls(
+                    X_train, y_train,
+                    X_val, y_val,
                     len(idx)
                 )
 
                 fold_probs.append(probs)
-                fold_labels.append(y_val)
+                fold_labels.append(y_val)   # ✅ FIXED indentation
 
-            threshold_acc=[]
+            threshold_acc = []
 
             for t in self.thresholds_fig4:
 
-                fold_acc=[]
+                fold_acc = []
 
-                for probs,y_val in zip(fold_probs,fold_labels):
+                for probs, y_val in zip(fold_probs, fold_labels):
 
                     max_probs = np.max(probs, axis=1)
                     preds = np.argmax(probs, axis=1)
@@ -250,14 +258,17 @@ class PaperExactAblation:
                         continue
 
                     acc = (preds[confident] == y_val[confident]).mean()
-
                     fold_acc.append(acc)
-                threshold_acc.append(np.mean(fold_acc))
 
-            results[name]=threshold_acc
+                # ✅ Safe mean
+                if len(fold_acc) > 0:
+                    threshold_acc.append(np.mean(fold_acc))
+                else:
+                    threshold_acc.append(np.nan)
 
-        self.results["fig4"]=results
+            results[name] = threshold_acc
 
+        self.results["fig4"] = results
 
     # -------------------------------------------------------
     # FIGURE 5
@@ -267,50 +278,68 @@ class PaperExactAblation:
 
         print("\nRunning Fig5 reproduction")
 
-        rows=[]
+        rows = []
 
-        for train_idx,val_idx in self.splits:
+        for train_idx, val_idx in self.splits:
 
-            X_train=self.X[train_idx]
-            y_train=self.y[train_idx]
+            # ---- 1. Get raw features (for GBDT) ----
+            X_train_raw = self.X_raw[train_idx]
+            X_val_raw = self.X_raw[val_idx]
 
-            X_val=self.X[val_idx]
-            y_val=self.y[val_idx]
+            # ---- 2. Get SLS features ----
+            X_train = self.X[train_idx]
+            y_train = self.y[train_idx]
 
-            probs=self.train_sls(X_train,y_train,X_val,y_val,31)
+            X_val = self.X[val_idx]
+            y_val = self.y[val_idx]
 
-            sls_preds=np.argmax(probs,axis=1)
-            max_probs=np.max(probs,axis=1)
+            # ---- 3. Normalize for SLS (per fold) ----
+            normalizer = FeatureNormalizer()
+            X_train = normalizer.fit_transform(X_train, self.feature_names)
+            X_val = normalizer.transform(X_val)
 
+            # ---- 4. Train SLS ----
+            probs = self.train_sls(X_train, y_train, X_val, y_val, 31)
+
+            sls_preds = np.argmax(probs, axis=1)
+            max_probs = np.max(probs, axis=1)
+
+            # ---- 5. Train GBDT (RAW features) ----
             gbdt = GBDTWrapper(
                 n_estimators=self.config.gbdt.n_estimators,
                 learning_rate=self.config.gbdt.learning_rate,
                 max_depth=self.config.gbdt.max_depth
             )
-            gbdt.fit(X_train,y_train)
 
-            gbdt_preds=gbdt.predict(X_val)
+            gbdt.fit(X_train_raw, y_train)
+            gbdt_preds = gbdt.predict(X_val_raw)
 
+            # ---- 6. Threshold analysis ----
             for t in self.thresholds_fig5:
 
-                subset=max_probs<t
+                subset = max_probs < t
 
-                if subset.sum()==0:
+                if subset.sum() == 0:
+                    rows.append({
+                        "threshold": t,
+                        "sls_minus_acc": np.nan,
+                        "gbdt_acc": np.nan,
+                        "subset_ratio": 0
+                    })
                     continue
 
-                sls_minus_acc=(sls_preds[subset]==y_val[subset]).mean()
-                gbdt_acc=(gbdt_preds[subset]==y_val[subset]).mean()
+                sls_minus_acc = (sls_preds[subset] == y_val[subset]).mean()
+                gbdt_acc = (gbdt_preds[subset] == y_val[subset]).mean()
 
                 rows.append({
-                    "threshold":t,
-                    "sls_minus_acc":sls_minus_acc,
-                    "gbdt_acc":gbdt_acc,
-                    "subset_ratio":subset.mean()
+                    "threshold": t,
+                    "sls_minus_acc": sls_minus_acc,
+                    "gbdt_acc": gbdt_acc,
+                    "subset_ratio": subset.mean()
                 })
 
-        df=pd.DataFrame(rows)
-
-        self.results["fig5"]=df.groupby("threshold").mean()
+        df = pd.DataFrame(rows)
+        self.results["fig5"] = df.groupby("threshold").mean()
 
 
     # -------------------------------------------------------
@@ -386,12 +415,9 @@ def main():
     events=study.load_pheme_data(args.data_dir)
 
     X,y=study.extract_features(events)
-
-    normalizer=FeatureNormalizer()
-
-    X=normalizer.fit_transform(X,study.feature_names)
-
+    X_raw = X.copy()
     study.X=X
+    study.X_raw = X_raw
     study.y=y
 
     study.setup_cv(X,y)

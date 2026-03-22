@@ -1,21 +1,4 @@
 from __future__ import annotations
-
-"""
-Configuration Manager for SLS Rumor Detection System.
-
-Central configuration controller used by:
-    train.py
-    predict.py
-    main.py
-
-Access example:
-    config = ConfigManager("configs/default.yaml")
-
-    config.model.input_dim
-    config.training.batch_size
-    config.gbdt.threshold
-"""
-
 import yaml
 import logging
 from dataclasses import dataclass, asdict

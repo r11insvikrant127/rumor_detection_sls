@@ -1,30 +1,3 @@
-"""
-    Why researchers use this
-
-The paper reports:
-
-Accuracy
-
-Precision
-
-Recall
-
-F1
-
-5-fold CV results 
-
-
-This logger helps you store those experiment results cleanly.
-    
-"""
-
-"""
-Paper-faithful logging utilities for SLS rumor detection.
-
-Designed for reproducible experiments following:
-Wei et al., 2021 (IJCNN)
-"""
-
 import logging
 import sys
 import json

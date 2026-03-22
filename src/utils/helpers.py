@@ -1,84 +1,12 @@
-"""
-    This file = training & experiment utilities.
-
-It does support operations, not modeling.
-
-Think of your project layers:
-
-Paper Model (SLS)
-    ↑
-trainer.py
-    ↑
-utils/helpers.py   ← THIS FILE
-What it actually helps with
-
-During training & testing, other files call functions here:
-
-Function	Used for
-normalize_features()	Z-score normalization
-create_data_loader()	PyTorch batching
-split_data()	train/val/test split
-set_seed()	reproducibility
-save_model()	checkpoint saving
-load_model()	reload trained SLS
-plot_training_history()	training curves
-save_results()	experiment outputs
-
-So this file provides infrastructure, not algorithm logic.
-
-Where it appears in workflow
-CSV features
-     ↓
-normalize_features()
-     ↓
-DataLoader
-     ↓
-SLS Training
-     ↓
-save_model()
-     ↓
-predict.py
-     ↓
-save_results()
-    
-"""
-
-"""
-Utility functions for PAPER-FAITHFUL SLS rumor detection system.
-
-Aligned with:
-Wei et al., 2021 (IJCNN)
-"""
-
 import numpy as np
 import torch
 import pandas as pd
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple, Dict, Any
 import json
 from sklearn.preprocessing import StandardScaler
 from datetime import datetime
 
-
-# ============================================================
-# FEATURE NORMALIZATION (Eq. 2 — Paper)
-# ============================================================
-
-def normalize_features(
-    features: np.ndarray,
-    scaler: Optional[StandardScaler] = None
-) -> Tuple[np.ndarray, StandardScaler]:
-    """
-    Z-score normalization used in the paper.
-    """
-
-    if scaler is None:
-        scaler = StandardScaler()
-        features = scaler.fit_transform(features)
-    else:
-        features = scaler.transform(features)
-
-    return features, scaler
 
 
 # ============================================================
@@ -96,12 +24,7 @@ def create_data_loader(
     add_channel_dim: bool = True,
     use_weighted_sampler: bool = False,
 ) -> torch.utils.data.DataLoader:
-    """
-    Create DataLoader with required shape (N,1,L).
 
-    If use_weighted_sampler=True:
-        performs class-balanced sampling WITHOUT modifying loss.
-    """
 
     x = torch.FloatTensor(features)
 

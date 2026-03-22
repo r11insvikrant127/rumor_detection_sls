@@ -99,19 +99,6 @@ class RumorDetectionTrainer:
 
         return X, y
 
-    # -------------------------------------------------
-    # CONFIDENCE COMPUTATION (paper rule)
-    # -------------------------------------------------
-    @staticmethod
-    def compute_confidence(probs):
-        probs = np.array(probs)
-
-        # Case 1: full softmax output (N,2)
-        if probs.ndim == 2:
-            return probs.max(axis=1)
-
-        # Case 2: only class-1 probability (N,)
-        return np.maximum(probs, 1 - probs)
 
     # -------------------------------------------------
     # CROSS VALIDATION
@@ -129,7 +116,12 @@ class RumorDetectionTrainer:
             print(f"Fold {fold}/5")
             print("="*60)
 
-            X_train, X_val = X[train_idx], X[val_idx]
+            # Raw features (for GBDT)
+            X_train_raw, X_val_raw = X[train_idx], X[val_idx]
+
+            # Copy for normalization (for SLS)
+            X_train, X_val = X_train_raw.copy(), X_val_raw.copy()
+            
             y_train, y_val = y[train_idx], y[val_idx]
 
             # ---------- Normalization ----------
@@ -172,54 +164,33 @@ class RumorDetectionTrainer:
             # ---------- Train GBDT ----------
             print("🌳 Training GBDT fallback...")
             gbdt = GradientBoostingClassifier(
-                random_state=42,
-                subsample=0.8
+                random_state=42
             )
-            gbdt.fit(X_train, y_train)
+            gbdt.fit(X_train_raw, y_train)
 
             # ---------- Predictions ----------
-            preds_sls, probs_sls = trainer.predict(
-                X_val.reshape(len(X_val), 1, 31),
-                return_probs=True
-            )
+            preds_sls, probs_sls = trainer.predict(X_val, return_probs=True)
 
-            max_probs = self.compute_confidence(probs_sls)
+            max_probs = probs_sls.max(axis=1)
 
             print("Mean confidence:", max_probs.mean())
 
-            # ---------- Threshold Sweep ----------
-            thresholds = [self.threshold]
+            # ---------- Fixed Threshold (Paper Logic) ----------
+            t = self.threshold
 
-            best_f1 = -1
-            best_threshold = self.threshold
-            best_preds = None
+            preds_temp = preds_sls.copy()
 
-            for t in thresholds:
+            uncertain = max_probs < t
+            routing_rate = uncertain.mean()
 
-                preds_temp = preds_sls.copy()
+            print(f"t={t:.2f} | routed={routing_rate:.3f}")
 
-                uncertain = max_probs < t
-                routing_rate = uncertain.mean()
+            # Apply GBDT only on uncertain samples
+            if np.any(uncertain):
+                preds_temp[uncertain] = gbdt.predict(X_val_raw[uncertain])
 
-                print(f"t={t:.2f} | routed={routing_rate:.3f}")
-
-                if np.any(uncertain):
-                    preds_temp[uncertain] = gbdt.predict(
-                        X_val[uncertain]
-                    )
-
-                metrics = Evaluator.compute_metrics(y_val, preds_temp)
-
-                if metrics["f1"] > best_f1:
-                    best_f1 = metrics["f1"]
-                    best_threshold = t
-                    best_preds = preds_temp
-
-            
-
-            print(f"Best threshold fold {fold}: {best_threshold:.2f}")
-
-            metrics = Evaluator.compute_metrics(y_val, best_preds)
+            # Compute final metrics
+            metrics = Evaluator.compute_metrics(y_val, preds_temp)
             fold_results.append(metrics)
 
             print(f"Accuracy: {metrics['accuracy']:.4f}")
@@ -229,9 +200,7 @@ class RumorDetectionTrainer:
         print(f"\nUsing FIXED global threshold: {self.threshold:.3f}")
 
         print("\n" + "="*60)
-        print(f"USING FIXED GLOBAL THRESHOLD: {self.threshold:.3f}")
-        print("="*60)
-
+        
         return fold_results
 
 

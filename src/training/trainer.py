@@ -1,15 +1,3 @@
-"""
-Paper-faithful trainer for SLS model.
-Wei et al. (IJCNN 2021)
-
-TRAINING:
-    - Circle Loss optimization
-    - No softmax during training
-
-INFERENCE:
-    - Temperature-scaled softmax (calibration only)
-"""
-
 import torch
 import numpy as np
 from tqdm import tqdm
@@ -53,7 +41,7 @@ class SLSTrainer:
         self.epochs = int(self.config.get("epochs", 100))
 
         # ✅ NEW: temperature scaling (inference only)
-        self.temperature = float(self.config.get("temperature", 0.5))
+        self.temperature = float(self.config.get("temperature", 1.0))
 
         # ✅ NEW: early stopping
         self.early_stop = self.config.get("early_stopping", True)
@@ -64,28 +52,27 @@ class SLSTrainer:
     # =====================================================
     def predict(self, X, return_probs=False):
 
+        was_training = self.model.training   # 🔥 store state
+
         self.model.eval()
 
-        if isinstance(X, np.ndarray):
+        if not torch.is_tensor(X):
             X = torch.tensor(X, dtype=torch.float32)
 
         X = X.to(self.device)
 
         with torch.no_grad():
-
             outputs = self.model(X)
-
-            # ✅ temperature scaling
-            outputs = outputs / self.temperature
-
-            probs = torch.softmax(outputs, dim=1)
+            probs = torch.softmax(outputs / self.temperature, dim=1)
             preds = torch.argmax(probs, dim=1)
 
             all_preds = preds.cpu().numpy()
-            all_probs = probs[:, 1].cpu().numpy()
+
+        if was_training:
+            self.model.train()   # restore only if needed
 
         if return_probs:
-            return all_preds, all_probs
+            return all_preds, probs.cpu().numpy()
 
         return all_preds
 
@@ -115,7 +102,7 @@ class SLSTrainer:
 
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(),
-                self.config.get("grad_clip", 1.0),
+                float(self.config.get("grad_clip", 1.0)),
             )
 
             self.optimizer.step()
@@ -132,7 +119,7 @@ class SLSTrainer:
 
         epoch_loss = total_loss / len(loader)
         epoch_acc = (np.array(all_preds) == np.array(all_labels)).mean()
-        epoch_f1 = f1_score(all_labels, all_preds, average="binary")
+        epoch_f1 = f1_score(all_labels, all_preds, average="binary", zero_division=0)
 
         return epoch_loss, epoch_acc, epoch_f1
 
@@ -143,7 +130,7 @@ class SLSTrainer:
 
         self.model.eval()
 
-        all_preds, all_labels, all_probs = [], [], []
+        all_preds, all_labels = [], []
         total_loss = 0
 
         with torch.no_grad():
@@ -157,23 +144,18 @@ class SLSTrainer:
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item()
 
-                # ✅ temperature scaling
-                outputs = outputs / self.temperature
-
-                probs = torch.softmax(outputs, dim=1)
-                preds = torch.argmax(probs, dim=1)
+                preds = torch.argmax(outputs, dim=1)
 
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
-                all_probs.extend(probs[:, 1].cpu().numpy())
+                
 
         metrics = Evaluator.compute_metrics(
             np.array(all_labels),
-            np.array(all_preds),
-            np.array(all_probs),
+            np.array(all_preds)
         )
 
-        metrics["val_loss"] = total_loss / len(loader)
+        metrics["val_loss"] = total_loss / max(len(loader), 1)
 
         return metrics
 
@@ -189,7 +171,7 @@ class SLSTrainer:
         best_f1 = -1
         best_state = None
         no_improve = 0
-
+        best_metrics = None
         for epoch in range(1, self.epochs + 1):
 
             train_loss, train_acc, train_f1 = self.train_epoch(
@@ -203,12 +185,15 @@ class SLSTrainer:
             print(
                 f"Epoch {epoch:03d} | "
                 f"Train Loss {train_loss:.4f} | "
+                f"Train Acc {train_acc:.4f} | "
+                f"Train F1 {train_f1:.4f} | "
                 f"Val F1 {val_metrics['f1']:.4f}"
             )
 
             if val_metrics["f1"] > best_f1:
                 best_f1 = val_metrics["f1"]
                 best_state = deepcopy(self.model.state_dict())
+                best_metrics = val_metrics
                 no_improve = 0
             else:
                 no_improve += 1
@@ -221,4 +206,4 @@ class SLSTrainer:
         if best_state is not None:
             self.model.load_state_dict(best_state)
 
-        return best_f1, val_metrics
+        return best_f1, best_metrics
