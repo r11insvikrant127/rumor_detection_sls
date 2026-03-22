@@ -43,7 +43,7 @@ class RvNNTrainer:
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)
                 label = torch.tensor([label]).to(self.device)
 
-                out = self.model(x).unsqueeze(0)
+                out = self.model(x)
                 loss = self.criterion(out, label)
 
                 self.optimizer.zero_grad()
@@ -69,7 +69,7 @@ class RvNNTrainer:
                     x = torch.tensor(features, dtype=torch.float32).to(self.device)
                     label = torch.tensor([label]).to(self.device)
 
-                    out = self.model(x).unsqueeze(0)
+                    out = self.model(x)
                     loss = self.criterion(out, label)
 
                     val_loss += loss.item()
