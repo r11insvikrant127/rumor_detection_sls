@@ -19,9 +19,24 @@ def fit_tfidf(graphs):
     for graph in graphs:
         for _, data in graph.nodes(data=True):
             text = data.get("text", "")
+
+            # ✅ CLEAN TEXT
+            if text is None:
+                continue
+
+            text = str(text).strip()
+
+            # skip empty / very short
+            if len(text) < 3:
+                continue
+
             texts.append(text)
 
-    print(f"[TF-IDF] Fitting on {len(texts)} tweets...")
+    print(f"[TF-IDF] Valid texts: {len(texts)}")
+
+    if len(texts) == 0:
+        raise ValueError("❌ No valid text found for TF-IDF")
+
     vectorizer.fit(texts)
     print("[TF-IDF] Done.")
 
@@ -35,6 +50,15 @@ def build_node_features(graph, node_list):
     for node in node_list:
         data = graph.nodes[node]
         text = data.get("text", "")
+
+        if text is None:
+            text = ""
+
+        text = str(text).strip()
+
+        if len(text) < 3:
+            text = "empty"
+
         texts.append(text)
 
     features = vectorizer.transform(texts)
