@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from src.preprocessing.tree_builder import TreeBuilder
-from src.preprocessing.graph_builder import build_node_features
+from src.preprocessing import build_node_features, fit_tfidf
 
 
 class RvNNTrainer:
@@ -15,14 +14,26 @@ class RvNNTrainer:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
-        self.tree_builder = TreeBuilder()
-
         # 🔥 Early stopping config
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
 
+    # =====================================================
+    # TRAIN
+    # =====================================================
     def train(self, events_train, labels_train, events_val, labels_val):
+        
+        print("🔧 Fitting TF-IDF...")
+        fit_tfidf(events_train)
+        print("✅ TF-IDF ready")
+        
+        # 🔍 DEBUG CHECK (ADD HERE)
+        print("\n🔍 CHECKING GRAPH NODE DATA:")
+        graph = events_train[0]
 
+        for _, data in graph.nodes(data=True):
+            print(data)
+            break
         best_loss = float("inf")
         best_state = None
         no_improve = 0
@@ -33,18 +44,18 @@ class RvNNTrainer:
             self.model.train()
             total_loss = 0
 
-            for event, label in zip(events_train, labels_train):
-
-                graph = event
+            for graph, label in zip(events_train, labels_train):
 
                 nodes = list(graph.nodes())
                 features = build_node_features(graph, nodes)
 
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)
-                label = torch.tensor([label]).to(self.device)
+                y = torch.tensor([label], dtype=torch.long).to(self.device)
 
-                out = self.model(x)
-                loss = self.criterion(out, label)
+                # ✅ IMPORTANT FIX: pass graph
+                out = self.model(graph, x)
+
+                loss = self.criterion(out, y)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -59,19 +70,18 @@ class RvNNTrainer:
             val_loss = 0
 
             with torch.no_grad():
-                for event, label in zip(events_val, labels_val):
-
-                    graph = event
+                for graph, label in zip(events_val, labels_val):
 
                     nodes = list(graph.nodes())
                     features = build_node_features(graph, nodes)
 
                     x = torch.tensor(features, dtype=torch.float32).to(self.device)
-                    label = torch.tensor([label]).to(self.device)
+                    y = torch.tensor([label], dtype=torch.long).to(self.device)
 
-                    out = self.model(x)
-                    loss = self.criterion(out, label)
+                    # ✅ IMPORTANT FIX: pass graph
+                    out = self.model(graph, x)
 
+                    loss = self.criterion(out, y)
                     val_loss += loss.item()
 
             val_loss = val_loss / len(events_val)
@@ -93,22 +103,25 @@ class RvNNTrainer:
         if best_state is not None:
             self.model.load_state_dict(best_state)
 
+    # =====================================================
+    # PREDICT
+    # =====================================================
     def predict(self, events):
 
         self.model.eval()
         preds = []
 
         with torch.no_grad():
-            for event in events:
-
-                graph = event
+            for graph in events:
 
                 nodes = list(graph.nodes())
                 features = build_node_features(graph, nodes)
 
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)
 
-                out = self.model(x)
-                preds.append(torch.argmax(out).item())
+                # ✅ IMPORTANT FIX: pass graph
+                out = self.model(graph, x)
+
+                preds.append(torch.argmax(out, dim=1).item())
 
         return np.array(preds)
