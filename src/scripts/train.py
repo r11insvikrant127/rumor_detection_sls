@@ -315,7 +315,7 @@ class RumorDetectionTrainer:
 
             # ---- RvNN ----
             rvnn_trainer = RvNNTrainer(
-                RvNN(),
+                RvNN(input_dim=3000, hidden_dim=100),
                 device=self.device,
                 config=self.config.training.__dict__
             )

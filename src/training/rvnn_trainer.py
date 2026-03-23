@@ -54,6 +54,7 @@ class RvNNTrainer:
 
                 nodes = list(nx.topological_sort(graph))
                 features = build_node_features(graph, nodes)
+                print("Feature shape:", features.shape)
 
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)
                 y = torch.tensor([label], dtype=torch.long).to(self.device)
