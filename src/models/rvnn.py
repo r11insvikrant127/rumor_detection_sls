@@ -62,6 +62,13 @@ class RvNN(nn.Module):
         # -------------------------------------------------
         # 1. Embed input features
         # -------------------------------------------------
+        # 🔍 DEBUG SAFETY CHECK
+        if features.shape[1] != self.embedding.in_features:
+            raise ValueError(
+                f"Feature mismatch: got {features.shape[1]}, "
+                f"expected {self.embedding.in_features}"
+            )
+
         x = self.embedding(features)   # [N, hidden_dim]
 
         # -------------------------------------------------

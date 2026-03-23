@@ -5,8 +5,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 # =====================================================
 # GLOBAL TF-IDF VECTORIZER
 # =====================================================
+# 🔥 Paper uses vocab size = 5000
 vectorizer = TfidfVectorizer(
-    max_features=3000,
+    max_features=5000,
     stop_words="english"
 )
 
@@ -18,13 +19,13 @@ def build_adjacency(graph, node_list):
     n = len(node_list)
     idx_map = {node: i for i, node in enumerate(node_list)}
 
-    adj = np.zeros((n, n))
+    adj = np.zeros((n, n), dtype=np.float32)
 
     for u, v in graph.edges():
         if u in idx_map and v in idx_map:
-            adj[idx_map[u], idx_map[v]] = 1
+            adj[idx_map[u], idx_map[v]] = 1.0
 
-    # normalize row-wise
+    # Row-normalize
     row_sum = adj.sum(axis=1, keepdims=True) + 1e-6
     adj = adj / row_sum
 
@@ -32,7 +33,7 @@ def build_adjacency(graph, node_list):
 
 
 # =====================================================
-# CLEAN TEXT (CRITICAL FIX)
+# CLEAN TEXT (FIXED & SAFE)
 # =====================================================
 def _clean_text(text):
     if text is None:
@@ -40,19 +41,16 @@ def _clean_text(text):
 
     text = str(text).strip()
 
-    # remove empty
+    # Remove completely empty text
     if len(text) == 0:
         return None
 
-    # remove very short / useless text
-    if len(text.split()) < 2:
-        return None
-
+    # 🔥 Keep short texts like "fake", "true", etc.
     return text
 
 
 # =====================================================
-# FIT TF-IDF ON TRAINING DATA (FIXED)
+# FIT TF-IDF ON TRAINING DATA
 # =====================================================
 def fit_tfidf(graphs):
     texts = []
@@ -66,7 +64,6 @@ def fit_tfidf(graphs):
 
     print(f"[TF-IDF] Valid texts: {len(texts)}")
 
-    # safety check
     if len(texts) == 0:
         raise ValueError("No valid text found for TF-IDF!")
 
@@ -75,16 +72,21 @@ def fit_tfidf(graphs):
 
 
 # =====================================================
-# BUILD NODE FEATURES (SAFE VERSION)
+# BUILD NODE FEATURES (ORDER SAFE)
 # =====================================================
 def build_node_features(graph, node_list):
+
+    # 🔥 Ensure TF-IDF is fitted
+    if not hasattr(vectorizer, "vocabulary_") or vectorizer.vocabulary_ is None:
+        raise ValueError("TF-IDF vectorizer is not fitted!")
+
     texts = []
 
+    # 🔥 MUST follow node_list order (topological order)
     for node in node_list:
         data = graph.nodes[node]
         text = _clean_text(data.get("text", ""))
 
-        # fallback for bad text
         if text is None:
             text = "empty tweet"
 

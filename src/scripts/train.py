@@ -9,6 +9,7 @@ import os
 import json
 import numpy as np
 import torch
+import networkx as nx
 import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -40,7 +41,7 @@ from src.preprocessing import fit_tfidf_bigcn
 from src.preprocessing import TreeBuilderBiGCN
 from src.preprocessing import build_node_features_bigcn
 from src.preprocessing import TreeBuilderRvNN
-
+from src.preprocessing.graph_builder_rvnn import build_node_features
 
 
 from sklearn.svm import LinearSVC
@@ -314,8 +315,16 @@ class RumorDetectionTrainer:
             preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
 
             # ---- RvNN ----
+            # 🔧 Get RvNN input dim dynamically (LIKE BIGCN)
+            sample_graph = graphs_train_rvnn[0]
+            nodes = list(nx.topological_sort(sample_graph))
+            sample_features = build_node_features(sample_graph, nodes)
+            rvnn_in_dim = sample_features.shape[1]
+
+            print(f"🔧 RvNN input dim: {rvnn_in_dim}")
+
             rvnn_trainer = RvNNTrainer(
-                RvNN(input_dim=3000, hidden_dim=100),
+                RvNN(input_dim=rvnn_in_dim, hidden_dim=100),
                 device=self.device,
                 config=self.config.training.__dict__
             )
