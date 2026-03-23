@@ -32,52 +32,80 @@ class TreeGRUCell(nn.Module):
 
 
 # =====================================================
-# TOP-DOWN RvNN (PAPER-FAITHFUL)
+# TOP-DOWN RvNN (FIXED + STABLE)
 # =====================================================
 class RvNN(nn.Module):
 
-    def __init__(self, input_dim=2, hidden_dim=64):
+    def __init__(self, input_dim=3000, hidden_dim=100, num_classes=2):
         super().__init__()
 
+        self.hidden_dim = hidden_dim
+
+        # TF-IDF → embedding
         self.embedding = nn.Linear(input_dim, hidden_dim)
+
+        # Tree GRU
         self.tree_gru = TreeGRUCell(hidden_dim, hidden_dim)
 
-        # output only uses pooled leaf representation
-        self.out = nn.Linear(hidden_dim, 2)
+        # Learnable root initial state (better than zeros)
+        self.root_state = nn.Parameter(torch.zeros(hidden_dim))
+
+        # Output layer
+        self.out = nn.Linear(hidden_dim, num_classes)
 
     def forward(self, graph, features):
+        """
+        graph: networkx DiGraph (tree)
+        features: tensor [num_nodes, input_dim]
+        """
 
-        # embed features
-        x = self.embedding(features)
+        # -------------------------------------------------
+        # 1. Embed input features
+        # -------------------------------------------------
+        x = self.embedding(features)   # [N, hidden_dim]
+
+        # -------------------------------------------------
+        # 2. Topological order (root → leaves)
+        # -------------------------------------------------
+        nodes = list(nx.topological_sort(graph))
+
+        # CRITICAL: map node → index
+        node_to_idx = {node: i for i, node in enumerate(nodes)}
 
         # store hidden states
         h = {}
 
-        # top-down traversal (root → leaves)
-        nodes = list(nx.topological_sort(graph))
-
+        # -------------------------------------------------
+        # 3. Top-down recursion
+        # -------------------------------------------------
         for node in nodes:
 
+            idx = node_to_idx[node]
             parents = list(graph.predecessors(node))
 
-            # root node
+            # Root node
             if len(parents) == 0:
-                h_parent = torch.zeros_like(x[node])
+                h_parent = self.root_state
             else:
-                h_parent = h[parents[0]]
+                parent = parents[0]   # tree assumption
+                h_parent = h[parent]
 
-            h[node] = self.tree_gru(x[node], h_parent)
+            h[node] = self.tree_gru(x[idx], h_parent)
 
-        # get leaf nodes
+        # -------------------------------------------------
+        # 4. Get leaf nodes
+        # -------------------------------------------------
         leaves = [n for n in graph.nodes() if graph.out_degree(n) == 0]
 
-        # stack leaf representations
-        h_leaves = torch.stack([h[n] for n in leaves])
-
-        # max pooling (CRITICAL — from paper)
+        # -------------------------------------------------
+        # 5. Max pooling over leaf representations
+        # -------------------------------------------------
+        h_leaves = torch.stack([h[n] for n in leaves])  # [num_leaves, hidden_dim]
         h_pool, _ = torch.max(h_leaves, dim=0)
 
-        # classification
-        out = self.out(h_pool)
+        # -------------------------------------------------
+        # 6. Classification
+        # -------------------------------------------------
+        out = self.out(h_pool)   # [num_classes]
 
-        return out.unsqueeze(0)
+        return out.unsqueeze(0)  # [1, num_classes]
