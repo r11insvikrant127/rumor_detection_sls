@@ -36,7 +36,7 @@ from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
-from src.preprocessing.graph_builder_bigcn import fit_tfidf
+from src.preprocessing import fit_tfidf_bigcn
 
 
 from sklearn.svm import LinearSVC
@@ -188,7 +188,7 @@ class RumorDetectionTrainer:
         
         # 🔥 FIT TF-IDF ON TRAINING DATA
         print("🔧 Fitting TF-IDF for BiGCN...")
-        fit_tfidf(graph_cache)
+        fit_tfidf_bigcn(graph_cache)
 
         # 🔥 DEBUG CHECK (ADD HERE)
         graph = graph_cache[0]

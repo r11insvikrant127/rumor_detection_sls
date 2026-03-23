@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from src.preprocessing import build_node_features, fit_tfidf
+from src.preprocessing import (
+    build_node_features_rvnn as build_node_features,
+    fit_tfidf_rvnn as fit_tfidf
+)
 
 
 class RvNNTrainer:
