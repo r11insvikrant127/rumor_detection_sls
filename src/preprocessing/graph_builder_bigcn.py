@@ -95,3 +95,26 @@ def build_adjacency(graph, node_list):
     adj = d_mat @ adj @ d_mat
 
     return adj
+
+
+def build_raw_adjacency(graph, node_list):
+    n = len(node_list)
+    idx_map = {node: i for i, node in enumerate(node_list)}
+
+    adj = np.zeros((n, n), dtype=np.float32)
+
+    for u, v in graph.edges():
+        if u in idx_map and v in idx_map:
+            adj[idx_map[u], idx_map[v]] = 1.0
+
+    # self-loops
+    adj = adj + np.eye(n, dtype=np.float32)
+
+    return adj
+
+
+def normalize_adjacency(adj):
+    degree = np.sum(adj, axis=1)
+    d_inv_sqrt = np.power(degree + 1e-6, -0.5)
+    d_mat = np.diag(d_inv_sqrt)
+    return d_mat @ adj @ d_mat

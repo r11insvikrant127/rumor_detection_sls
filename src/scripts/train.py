@@ -336,7 +336,7 @@ class RumorDetectionTrainer:
 
             # ---- PPC ----
             ppc_trainer = PPCTrainer(
-                PPC(input_dim=8),
+                PPC(input_dim=9),
                 device=self.device,
                 config=self.config.training.__dict__
             )

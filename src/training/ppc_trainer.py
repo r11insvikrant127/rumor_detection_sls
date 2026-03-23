@@ -38,8 +38,10 @@ class PPCTrainer:
 
         for _, attr in nodes:
             feat = attr.get("features", None)
+            time = attr.get("time", 0.0)
+
             if feat is not None:
-                features.append(feat)
+                features.append(feat + [time])
 
         if len(features) == 0:
             return np.zeros((self.max_len, self.model.gru.input_size), dtype=np.float32)
@@ -54,12 +56,6 @@ class PPCTrainer:
             indices = np.random.choice(len(features), pad_len, replace=True)
             extra = features[indices]
             features = np.concatenate([features, extra], axis=0)
-
-        # -------- NORMALIZATION --------
-        mean = features.mean(axis=0)
-        std = features.std(axis=0)
-        std = np.where(std < 1e-6, 1.0, std)
-        features = (features - mean) / std
 
         return features
 
