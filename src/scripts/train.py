@@ -38,6 +38,10 @@ from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
 
 
+from sklearn.svm import LinearSVC
+from sklearn.preprocessing import StandardScaler
+
+
 # =====================================================
 # TABLE III PRINT
 # =====================================================
@@ -197,6 +201,10 @@ class RumorDetectionTrainer:
             normalizer = FeatureNormalizer()
             X_train = normalizer.fit_transform(X_train_raw.copy(), self.feature_names)
             X_val = normalizer.transform(X_val_raw.copy())
+            # -------- SVM Scaling --------
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_raw)
+            X_val_scaled = scaler.transform(X_val_raw)
 
             # -------- SLS --------
             model = PaperExactSLS(
@@ -315,17 +323,19 @@ class RumorDetectionTrainer:
             )
 
             print("⚡ Training SVM-RBF...")
-            svm_rbf = SVC(kernel="rbf", max_iter=5000)
-            svm_rbf.fit(X_train_raw, y_train)
+            svm_rbf = SVC(kernel="rbf", max_iter=10000)
+            svm_rbf.fit(X_train_scaled, y_train)
+
             all_model_results["SVM-RBF"].append(
-                Evaluator.compute_metrics(y_val, svm_rbf.predict(X_val_raw))
+                Evaluator.compute_metrics(y_val, svm_rbf.predict(X_val_scaled))
             )
 
             print("⚡ Training SVM-TS...")
-            svm_ts = SVC(kernel="linear")
-            svm_ts.fit(X_train_raw, y_train)
+            svm_ts = LinearSVC(max_iter=10000)
+            svm_ts.fit(X_train_scaled, y_train)
+
             all_model_results["SVM-TS"].append(
-                Evaluator.compute_metrics(y_val, svm_ts.predict(X_val_raw))
+                Evaluator.compute_metrics(y_val, svm_ts.predict(X_val_scaled))
             )
 
         return fold_results, all_model_results
