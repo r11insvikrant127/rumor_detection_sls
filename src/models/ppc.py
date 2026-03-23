@@ -4,17 +4,51 @@ import torch.nn.functional as F
 
 
 class PPC(nn.Module):
-    def __init__(self, input_dim=2):
+    def __init__(
+        self,
+        input_dim=8,     
+        gru_hidden=64,
+        cnn_filters=32,
+        kernel_size=3,
+        num_classes=2
+    ):
         super().__init__()
 
-        self.conv = nn.Conv1d(input_dim, 32, kernel_size=3, padding=1)
-        self.rnn = nn.GRU(32, 64, batch_first=True)
-        self.fc = nn.Linear(64, 2)
+        # -------- GRU (GLOBAL) --------
+        self.gru = nn.GRU(
+            input_dim,
+            gru_hidden,
+            batch_first=True
+        )
+
+        # -------- CNN (LOCAL) --------
+        self.conv = nn.Conv1d(
+            input_dim,
+            cnn_filters,
+            kernel_size=kernel_size
+        )
+
+        # -------- FINAL --------
+        self.fc = nn.Sequential(
+            nn.Linear(gru_hidden + cnn_filters, 64),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(64, num_classes)
+        )
 
     def forward(self, x):
-        x = x.transpose(1, 2)
-        x = F.relu(self.conv(x))
-        x = x.transpose(1, 2)
+        # x: (B, T, F)
 
-        _, h = self.rnn(x)
-        return self.fc(h.squeeze(0))
+        # -------- GRU branch --------
+        gru_out, _ = self.gru(x)   # (B, T, H)
+        sR = torch.mean(gru_out, dim=1)  # mean pooling
+
+        # -------- CNN branch --------
+        x_cnn = x.transpose(1, 2)  # (B, F, T)
+        conv_out = F.relu(self.conv(x_cnn))  # (B, C, T)
+        sC = torch.mean(conv_out, dim=2)  # mean pooling
+
+        # -------- CONCAT --------
+        s = torch.cat([sR, sC], dim=1)
+
+        return self.fc(s)

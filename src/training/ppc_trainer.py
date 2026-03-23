@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from src.preprocessing.tree_builder import TreeBuilder
-from src.preprocessing.graph_builder import build_node_features
+
+from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 
 
 class PPCTrainer:
@@ -13,14 +13,66 @@ class PPCTrainer:
         self.epochs = epochs
 
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+        self.optimizer = torch.optim.Adadelta(self.model.parameters())
 
-        self.tree_builder = TreeBuilder()
+        self.tree_builder = TreeBuilderPPC()
 
-        # 🔥 Early stopping config
+        # -------- PPC CONFIG --------
+        self.max_len = 40  # paper: ~30–40
+
+        # -------- Early stopping --------
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
 
+    # ==================================================
+    # 🔥 BUILD SEQUENCE (MOST IMPORTANT PART)
+    # ==================================================
+    def build_sequence(self, graph):
+        """
+        Convert graph → time-ordered fixed-length sequence
+        """
+
+        # sort by propagation time
+        nodes = sorted(
+            graph.nodes(data=True),
+            key=lambda x: x[1].get("time", 0)
+        )
+
+        features = []
+
+        for _, attr in nodes:
+            feat = attr.get("features", None)
+            if feat is not None:
+                features.append(feat)
+
+        if len(features) == 0:
+            # fallback (rare)
+            return np.zeros((self.max_len, self.model.gru.input_size), dtype=np.float32)
+
+        features = np.array(features, dtype=np.float32)
+
+        # -------- TRUNCATE --------
+        if len(features) >= self.max_len:
+            features = features[:self.max_len]
+        else:
+            pad_len = self.max_len - len(features)
+            indices = np.random.choice(len(features), pad_len, replace=True)
+            extra = features[indices]
+            features = np.concatenate([features, extra], axis=0)
+
+        # -------- NORMALIZATION (AFTER FINAL SEQUENCE) --------
+        mean = features.mean(axis=0)
+        std = features.std(axis=0)
+        std = np.where(std < 1e-6, 1.0, std)
+        features = (features - mean) / std
+
+        return features
+
+            
+
+    # ==================================================
+    # TRAIN
+    # ==================================================
     def train(self, events_train, labels_train, events_val, labels_val):
 
         best_loss = float("inf")
@@ -33,12 +85,9 @@ class PPCTrainer:
             self.model.train()
             total_loss = 0
 
-            for event, label in zip(events_train, labels_train):
+            for graph, label in zip(events_train, labels_train):
 
-                graph = event
-
-                nodes = list(graph.nodes())
-                features = build_node_features(graph, nodes)
+                features = self.build_sequence(graph)
 
                 x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
                 label = torch.tensor([label]).to(self.device)
@@ -59,12 +108,9 @@ class PPCTrainer:
             val_loss = 0
 
             with torch.no_grad():
-                for event, label in zip(events_val, labels_val):
+                for graph, label in zip(events_val, labels_val):
 
-                    graph = event
-
-                    nodes = list(graph.nodes())
-                    features = build_node_features(graph, nodes)
+                    features = self.build_sequence(graph)
 
                     x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
                     label = torch.tensor([label]).to(self.device)
@@ -93,18 +139,18 @@ class PPCTrainer:
         if best_state is not None:
             self.model.load_state_dict(best_state)
 
+    # ==================================================
+    # PREDICT
+    # ==================================================
     def predict(self, events):
 
         self.model.eval()
         preds = []
 
         with torch.no_grad():
-            for event in events:
+            for graph in events:
 
-                graph = event
-
-                nodes = list(graph.nodes())
-                features = build_node_features(graph, nodes)
+                features = self.build_sequence(graph)
 
                 x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
 

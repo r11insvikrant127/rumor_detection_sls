@@ -32,7 +32,7 @@ from sklearn.svm import SVC
 from src.models.bigcn import BiGCN
 from src.models.rvnn import RvNN
 from src.models.ppc import PPC
-from src.preprocessing.tree_builder import TreeBuilder
+from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
@@ -174,7 +174,7 @@ class RumorDetectionTrainer:
         # =====================================================
         print("🔄 Building graph cache...")
 
-        tree_builder = TreeBuilder()
+        tree_builder = TreeBuilderPPC()
         graph_cache = []
 
         for event in events:
@@ -185,6 +185,14 @@ class RumorDetectionTrainer:
             graph_cache.append(graph)
 
         print("✅ Graph cache ready")
+
+        # 🔥 DEBUG CHECK (ADD HERE)
+        graph = graph_cache[0]
+
+        print("\n🔍 PPC GRAPH CHECK:")
+        for node, attr in graph.nodes(data=True):
+            print(attr)
+            break
         
         for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), 1):
 
@@ -195,7 +203,7 @@ class RumorDetectionTrainer:
             X_train_raw, X_val_raw = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
 
-            events_val = [events[i] for i in val_idx]
+            graphs_val = [graph_cache[i] for i in val_idx]
 
             # Normalize
             normalizer = FeatureNormalizer()
@@ -263,7 +271,7 @@ class RumorDetectionTrainer:
 
             # ---- PPC ----
             ppc_trainer = PPCTrainer(
-                PPC(),
+                PPC(input_dim=8),
                 device=self.device,
                 config=self.config.training.__dict__
             )
