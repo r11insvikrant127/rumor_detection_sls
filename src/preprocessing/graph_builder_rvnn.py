@@ -1,11 +1,12 @@
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+
 # =====================================================
 # GLOBAL TF-IDF VECTORIZER
 # =====================================================
 vectorizer = TfidfVectorizer(
-    max_features=3000,    
+    max_features=3000,
     stop_words="english"
 )
 
@@ -31,33 +32,64 @@ def build_adjacency(graph, node_list):
 
 
 # =====================================================
-# FIT TF-IDF ON TRAINING DATA (CALL ONCE)
+# CLEAN TEXT (CRITICAL FIX)
+# =====================================================
+def _clean_text(text):
+    if text is None:
+        return None
+
+    text = str(text).strip()
+
+    # remove empty
+    if len(text) == 0:
+        return None
+
+    # remove very short / useless text
+    if len(text.split()) < 2:
+        return None
+
+    return text
+
+
+# =====================================================
+# FIT TF-IDF ON TRAINING DATA (FIXED)
 # =====================================================
 def fit_tfidf(graphs):
     texts = []
 
     for graph in graphs:
         for _, data in graph.nodes(data=True):
-            text = data.get("text", "")
-            texts.append(text)
+            text = _clean_text(data.get("text", ""))
 
-    print(f"[TF-IDF] Fitting on {len(texts)} tweets...")
+            if text is not None:
+                texts.append(text)
+
+    print(f"[TF-IDF] Valid texts: {len(texts)}")
+
+    # safety check
+    if len(texts) == 0:
+        raise ValueError("No valid text found for TF-IDF!")
+
     vectorizer.fit(texts)
     print("[TF-IDF] Done.")
 
 
 # =====================================================
-# BUILD NODE FEATURES (TF-IDF)
+# BUILD NODE FEATURES (SAFE VERSION)
 # =====================================================
 def build_node_features(graph, node_list):
     texts = []
 
     for node in node_list:
         data = graph.nodes[node]
-        text = data.get("text", "")
+        text = _clean_text(data.get("text", ""))
+
+        # fallback for bad text
+        if text is None:
+            text = "empty tweet"
+
         texts.append(text)
 
-    # transform using pre-fitted vectorizer
     features = vectorizer.transform(texts)
 
     return features.toarray().astype(np.float32)
