@@ -38,6 +38,7 @@ from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
 from src.preprocessing import fit_tfidf_bigcn
 from src.preprocessing import TreeBuilderBiGCN
+from src.preprocessing import build_node_features_bigcn
 
 
 
@@ -267,8 +268,22 @@ class RumorDetectionTrainer:
             # ---- BiGCN ----
             graphs_train_bigcn = [graph_cache_bigcn[i] for i in train_idx]
             graphs_val_bigcn = [graph_cache_bigcn[i] for i in val_idx]
+
             print("🔧 Fitting TF-IDF (fold-wise)...")
             fit_tfidf_bigcn(graphs_train_bigcn)
+
+            # 🔧 Get dynamic input dimension for BiGCN
+            sample_graph = graphs_train_bigcn[0]
+
+            sample_nodes = sorted(
+                sample_graph.nodes(),
+                key=lambda n: sample_graph.nodes[n]["depth"]
+            )
+
+            sample_features = build_node_features_bigcn(sample_graph, sample_nodes)
+            in_dim = sample_features.shape[1]
+
+            print(f"🔧 BiGCN input dim: {in_dim}")
 
             # ---- PPC / RvNN ----
             graphs_train_ppc = [graph_cache_ppc[i] for i in train_idx]
@@ -276,10 +291,11 @@ class RumorDetectionTrainer:
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
-                BiGCN(in_dim=3000),
+                BiGCN(in_dim=in_dim),
                 device=self.device,
                 config=self.config.training.__dict__
             )
+
             bigcn_trainer.train(graphs_train_bigcn, y_train, graphs_val_bigcn, y_val)
             preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
 
