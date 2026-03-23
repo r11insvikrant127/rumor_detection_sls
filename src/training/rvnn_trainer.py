@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import networkx as nx
 from src.preprocessing import (
     build_node_features_rvnn as build_node_features,
     fit_tfidf_rvnn as fit_tfidf
@@ -77,7 +78,7 @@ class RvNNTrainer:
             with torch.no_grad():
                 for graph, label in zip(events_val, labels_val):
 
-                    nodes = list(graph.nodes())
+                    nodes = list(nx.topological_sort(graph))
                     features = build_node_features(graph, nodes)
 
                     x = torch.tensor(features, dtype=torch.float32).to(self.device)
@@ -119,7 +120,7 @@ class RvNNTrainer:
         with torch.no_grad():
             for graph in events:
 
-                nodes = list(graph.nodes())
+                nodes = list(nx.topological_sort(graph))
                 features = build_node_features(graph, nodes)
 
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)

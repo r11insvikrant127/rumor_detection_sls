@@ -39,6 +39,7 @@ from src.training.ppc_trainer import PPCTrainer
 from src.preprocessing import fit_tfidf_bigcn
 from src.preprocessing import TreeBuilderBiGCN
 from src.preprocessing import build_node_features_bigcn
+from src.preprocessing import TreeBuilderRvNN
 
 
 
@@ -177,9 +178,13 @@ class RumorDetectionTrainer:
         # =========================
         print("🔄 Building graph caches...")
 
-        # ---- PPC / RvNN ----
+        # ---- PPC ----
         tree_builder_ppc = TreeBuilderPPC()
         graph_cache_ppc = []
+
+        # ---- RvNN ----
+        tree_builder_rvnn = TreeBuilderRvNN()
+        graph_cache_rvnn = []
 
         # ---- BiGCN ----
         tree_builder_bigcn = TreeBuilderBiGCN()
@@ -193,6 +198,13 @@ class RumorDetectionTrainer:
                 source_id=event["source_id"]
             )
             graph_cache_ppc.append(graph_ppc)
+            
+            # RvNN graph (WITH TEXT)
+            graph_rvnn = tree_builder_rvnn.build(
+                tweets=event["tweets"],
+                source_id=event["source_id"]
+            )
+            graph_cache_rvnn.append(graph_rvnn)
 
             # BiGCN graph (with text)
             graph_bigcn = tree_builder_bigcn.build_from_tweets(
@@ -288,6 +300,8 @@ class RumorDetectionTrainer:
             # ---- PPC / RvNN ----
             graphs_train_ppc = [graph_cache_ppc[i] for i in train_idx]
             graphs_val_ppc = [graph_cache_ppc[i] for i in val_idx]
+            graphs_train_rvnn = [graph_cache_rvnn[i] for i in train_idx]
+            graphs_val_rvnn = [graph_cache_rvnn[i] for i in val_idx]
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
@@ -305,8 +319,8 @@ class RumorDetectionTrainer:
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            rvnn_trainer.train(graphs_train_ppc, y_train, graphs_val_ppc, y_val)
-            preds_rvnn = rvnn_trainer.predict(graphs_val_ppc)
+            rvnn_trainer.train(graphs_train_rvnn, y_train, graphs_val_rvnn, y_val)
+            preds_rvnn = rvnn_trainer.predict(graphs_val_rvnn)
 
             # ---- PPC ----
             ppc_trainer = PPCTrainer(
