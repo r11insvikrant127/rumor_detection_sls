@@ -46,7 +46,9 @@ class RvNNTrainer:
 
             for graph, label in zip(events_train, labels_train):
 
-                nodes = list(graph.nodes())
+                import networkx as nx
+
+                nodes = list(nx.topological_sort(graph))
                 features = build_node_features(graph, nodes)
 
                 x = torch.tensor(features, dtype=torch.float32).to(self.device)
