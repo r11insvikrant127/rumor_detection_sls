@@ -41,7 +41,7 @@ from src.preprocessing import fit_tfidf_bigcn
 from src.preprocessing import TreeBuilderBiGCN
 from src.preprocessing import build_node_features_bigcn
 from src.preprocessing import TreeBuilderRvNN
-from src.preprocessing.graph_builder_rvnn import build_node_features
+from src.preprocessing.graph_builder_rvnn import build_node_features, fit_tfidf
 
 
 from sklearn.svm import LinearSVC
@@ -303,6 +303,9 @@ class RumorDetectionTrainer:
             graphs_val_ppc = [graph_cache_ppc[i] for i in val_idx]
             graphs_train_rvnn = [graph_cache_rvnn[i] for i in train_idx]
             graphs_val_rvnn = [graph_cache_rvnn[i] for i in val_idx]
+            # 🔧 Fit TF-IDF for RvNN (VERY IMPORTANT)
+            print("🔧 Fitting TF-IDF for RvNN (fold-wise)...")
+            fit_tfidf(graphs_train_rvnn)
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
