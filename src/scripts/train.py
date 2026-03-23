@@ -37,6 +37,8 @@ from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
 from src.preprocessing import fit_tfidf_bigcn
+from src.preprocessing import TreeBuilderBiGCN
+
 
 
 from sklearn.svm import LinearSVC
@@ -169,31 +171,42 @@ class RumorDetectionTrainer:
             "RvNN": [],
             "PPC": []
         }
-        # =====================================================
-        # GRAPH CACHING (BUILD ONCE)
-        # =====================================================
-        print("🔄 Building graph cache...")
-        
-        tree_builder = TreeBuilderPPC()
-        graph_cache = []
+        # =========================
+        # GRAPH CACHING
+        # =========================
+        print("🔄 Building graph caches...")
+
+        # ---- PPC / RvNN ----
+        tree_builder_ppc = TreeBuilderPPC()
+        graph_cache_ppc = []
+
+        # ---- BiGCN ----
+        tree_builder_bigcn = TreeBuilderBiGCN()
+        graph_cache_bigcn = []
 
         for event in events:
-            graph = tree_builder.build_from_tweets(
+
+            # PPC graph
+            graph_ppc = tree_builder_ppc.build_from_tweets(
                 tweets=event["tweets"],
                 source_id=event["source_id"]
             )
-            graph_cache.append(graph)
+            graph_cache_ppc.append(graph_ppc)
 
-        print("✅ Graph cache ready")
-        
-        # 🔥 FIT TF-IDF ON TRAINING DATA
-        print("🔧 Fitting TF-IDF for BiGCN...")
-        fit_tfidf_bigcn(graph_cache)
+            # BiGCN graph (with text)
+            graph_bigcn = tree_builder_bigcn.build_from_tweets(
+                tweets=event["tweets"],
+                source_id=event["source_id"]
+            )
+            graph_cache_bigcn.append(graph_bigcn)
+
+        print("✅ Graph caches ready")
+    
 
         # 🔥 DEBUG CHECK (ADD HERE)
-        graph = graph_cache[0]
+        graph = graph_cache_bigcn[0]
 
-        print("\n🔍 PPC GRAPH CHECK:")
+        print("\n🔍 BIGCN GRAPH CHECK:")
         for node, attr in graph.nodes(data=True):
             print(attr)
             break
@@ -207,7 +220,6 @@ class RumorDetectionTrainer:
             X_train_raw, X_val_raw = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
 
-            graphs_val = [graph_cache[i] for i in val_idx]
 
             # Normalize
             normalizer = FeatureNormalizer()
@@ -252,8 +264,15 @@ class RumorDetectionTrainer:
             # =====================================================
             # TRAIN DEEP MODELS (BiGCN, RvNN, PPC)
             # =====================================================
-            graphs_train = [graph_cache[i] for i in train_idx]
-            graphs_val = [graph_cache[i] for i in val_idx]
+            # ---- BiGCN ----
+            graphs_train_bigcn = [graph_cache_bigcn[i] for i in train_idx]
+            graphs_val_bigcn = [graph_cache_bigcn[i] for i in val_idx]
+            print("🔧 Fitting TF-IDF (fold-wise)...")
+            fit_tfidf_bigcn(graphs_train_bigcn)
+
+            # ---- PPC / RvNN ----
+            graphs_train_ppc = [graph_cache_ppc[i] for i in train_idx]
+            graphs_val_ppc = [graph_cache_ppc[i] for i in val_idx]
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
@@ -261,8 +280,8 @@ class RumorDetectionTrainer:
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            bigcn_trainer.train(graphs_train, y_train, graphs_val, y_val)
-            preds_bigcn = bigcn_trainer.predict(graphs_val)
+            bigcn_trainer.train(graphs_train_bigcn, y_train, graphs_val_bigcn, y_val)
+            preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
 
             # ---- RvNN ----
             rvnn_trainer = RvNNTrainer(
@@ -270,8 +289,8 @@ class RumorDetectionTrainer:
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            rvnn_trainer.train(graphs_train, y_train, graphs_val, y_val)
-            preds_rvnn = rvnn_trainer.predict(graphs_val)
+            rvnn_trainer.train(graphs_train_ppc, y_train, graphs_val_ppc, y_val)
+            preds_rvnn = rvnn_trainer.predict(graphs_val_ppc)
 
             # ---- PPC ----
             ppc_trainer = PPCTrainer(
@@ -279,8 +298,8 @@ class RumorDetectionTrainer:
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            ppc_trainer.train(graphs_train, y_train, graphs_val, y_val)
-            preds_ppc = ppc_trainer.predict(graphs_val)
+            ppc_trainer.train(graphs_train_ppc, y_train, graphs_val_ppc, y_val)
+            preds_ppc = ppc_trainer.predict(graphs_val_ppc)
 
             # ---- store metrics ----
             all_model_results["BiGCN"].append(

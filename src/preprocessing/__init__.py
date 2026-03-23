@@ -1,6 +1,7 @@
 from .feature_extractor import FeatureExtractor
 from .tree_builder import TreeBuilder
 from .tree_builder_ppc import TreeBuilderPPC
+from .tree_builder_bigcn import TreeBuilderBiGCN
 from .kernel_subtree import KernelSubtreeExtractor
 from .feature_normalizer import FeatureNormalizer
 
@@ -23,6 +24,7 @@ __all__ = [
     "FeatureExtractor",
     "TreeBuilder",
     "TreeBuilderPPC",
+    "TreeBuilderBiGCN",
     "KernelSubtreeExtractor",
     "FeatureNormalizer",
 
