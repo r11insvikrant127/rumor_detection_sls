@@ -36,11 +36,11 @@ from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
+from src.preprocessing.graph_builder_bigcn import fit_tfidf
 
 
 from sklearn.svm import LinearSVC
 from sklearn.preprocessing import StandardScaler
-
 
 # =====================================================
 # TABLE III PRINT
@@ -173,7 +173,7 @@ class RumorDetectionTrainer:
         # GRAPH CACHING (BUILD ONCE)
         # =====================================================
         print("🔄 Building graph cache...")
-
+        
         tree_builder = TreeBuilderPPC()
         graph_cache = []
 
@@ -185,6 +185,10 @@ class RumorDetectionTrainer:
             graph_cache.append(graph)
 
         print("✅ Graph cache ready")
+        
+        # 🔥 FIT TF-IDF ON TRAINING DATA
+        print("🔧 Fitting TF-IDF for BiGCN...")
+        fit_tfidf(graph_cache)
 
         # 🔥 DEBUG CHECK (ADD HERE)
         graph = graph_cache[0]
@@ -253,7 +257,7 @@ class RumorDetectionTrainer:
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
-                BiGCN(in_dim=2),
+                BiGCN(in_dim=3000),
                 device=self.device,
                 config=self.config.training.__dict__
             )

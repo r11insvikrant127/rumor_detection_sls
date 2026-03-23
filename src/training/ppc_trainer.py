@@ -12,27 +12,23 @@ class PPCTrainer:
         self.device = device
         self.epochs = epochs
 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = None
         self.optimizer = torch.optim.Adadelta(self.model.parameters())
 
         self.tree_builder = TreeBuilderPPC()
 
-        # -------- PPC CONFIG --------
-        self.max_len = 40  # paper: ~30–40
+        self.max_len = 40
 
-        # -------- Early stopping --------
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
 
+        self.batch_size = 32
+
     # ==================================================
-    # 🔥 BUILD SEQUENCE (MOST IMPORTANT PART)
+    # BUILD SEQUENCE
     # ==================================================
     def build_sequence(self, graph):
-        """
-        Convert graph → time-ordered fixed-length sequence
-        """
 
-        # sort by propagation time
         nodes = sorted(
             graph.nodes(data=True),
             key=lambda x: x[1].get("time", 0)
@@ -46,12 +42,11 @@ class PPCTrainer:
                 features.append(feat)
 
         if len(features) == 0:
-            # fallback (rare)
             return np.zeros((self.max_len, self.model.gru.input_size), dtype=np.float32)
 
         features = np.array(features, dtype=np.float32)
 
-        # -------- TRUNCATE --------
+        # -------- TRUNCATE / PAD --------
         if len(features) >= self.max_len:
             features = features[:self.max_len]
         else:
@@ -60,7 +55,7 @@ class PPCTrainer:
             extra = features[indices]
             features = np.concatenate([features, extra], axis=0)
 
-        # -------- NORMALIZATION (AFTER FINAL SEQUENCE) --------
+        # -------- NORMALIZATION --------
         mean = features.mean(axis=0)
         std = features.std(axis=0)
         std = np.where(std < 1e-6, 1.0, std)
@@ -68,12 +63,20 @@ class PPCTrainer:
 
         return features
 
-            
-
     # ==================================================
     # TRAIN
     # ==================================================
     def train(self, events_train, labels_train, events_val, labels_val):
+
+        # -------- CLASS WEIGHTS --------
+        class_counts = np.bincount(labels_train)
+        weights = class_counts.sum() / (len(class_counts) * class_counts)
+
+        weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
+        self.criterion = nn.CrossEntropyLoss(weight=weights)
+
+        print("PPC Class counts:", class_counts)
+        print("PPC Class weights:", weights)
 
         best_loss = float("inf")
         best_state = None
@@ -81,19 +84,29 @@ class PPCTrainer:
 
         for epoch in range(self.epochs):
 
+            # -------- SHUFFLE (IMPORTANT) --------
+            perm = np.random.permutation(len(events_train))
+            events_train = [events_train[i] for i in perm]
+            labels_train = labels_train[perm]
+
             # -------- TRAIN --------
             self.model.train()
             total_loss = 0
 
-            for graph, label in zip(events_train, labels_train):
+            for i in range(0, len(events_train), self.batch_size):
 
-                features = self.build_sequence(graph)
+                batch_graphs = events_train[i:i+self.batch_size]
+                batch_labels = labels_train[i:i+self.batch_size]
 
-                x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
-                label = torch.tensor([label]).to(self.device)
+                batch_features = [
+                    self.build_sequence(graph) for graph in batch_graphs
+                ]
+
+                x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
+                y = torch.tensor(batch_labels, dtype=torch.long).to(self.device)
 
                 out = self.model(x)
-                loss = self.criterion(out, label)
+                loss = self.criterion(out, y)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -101,26 +114,33 @@ class PPCTrainer:
 
                 total_loss += loss.item()
 
-            train_loss = total_loss / len(events_train)
+            num_batches = int(np.ceil(len(events_train) / self.batch_size))
+            train_loss = total_loss / num_batches
 
             # -------- VALIDATION --------
             self.model.eval()
             val_loss = 0
 
             with torch.no_grad():
-                for graph, label in zip(events_val, labels_val):
+                for i in range(0, len(events_val), self.batch_size):
 
-                    features = self.build_sequence(graph)
+                    batch_graphs = events_val[i:i+self.batch_size]
+                    batch_labels = labels_val[i:i+self.batch_size]
 
-                    x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
-                    label = torch.tensor([label]).to(self.device)
+                    batch_features = [
+                        self.build_sequence(graph) for graph in batch_graphs
+                    ]
+
+                    x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
+                    y = torch.tensor(batch_labels, dtype=torch.long).to(self.device)
 
                     out = self.model(x)
-                    loss = self.criterion(out, label)
+                    loss = self.criterion(out, y)
 
                     val_loss += loss.item()
 
-            val_loss = val_loss / len(events_val)
+            num_val_batches = int(np.ceil(len(events_val) / self.batch_size))
+            val_loss = val_loss / num_val_batches
 
             print(f"[PPC] Epoch {epoch+1} Train: {train_loss:.4f} | Val: {val_loss:.4f}")
 
@@ -148,13 +168,17 @@ class PPCTrainer:
         preds = []
 
         with torch.no_grad():
-            for graph in events:
+            for i in range(0, len(events), self.batch_size):
 
-                features = self.build_sequence(graph)
+                batch_graphs = events[i:i+self.batch_size]
 
-                x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
+                batch_features = [
+                    self.build_sequence(graph) for graph in batch_graphs
+                ]
+
+                x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
 
                 out = self.model(x)
-                preds.append(torch.argmax(out).item())
+                preds.extend(torch.argmax(out, dim=1).cpu().numpy())
 
         return np.array(preds)

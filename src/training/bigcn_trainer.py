@@ -2,9 +2,15 @@ import torch
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
+
 from src.preprocessing.tree_builder import TreeBuilder
-from src.preprocessing.graph_builder import build_adjacency, build_node_features
+from src.preprocessing.graph_builder_bigcn import build_adjacency, build_node_features
 from src.training.evaluator import Evaluator
+
+
+def drop_edge(adj, drop_rate=0.2):
+    mask = np.random.rand(*adj.shape) > drop_rate
+    return adj * mask
 
 
 class BiGCNTrainer:
@@ -19,7 +25,6 @@ class BiGCNTrainer:
 
         self.tree_builder = TreeBuilder()
 
-   
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
 
@@ -39,9 +44,15 @@ class BiGCNTrainer:
 
                 graph = event
 
+                # ✅ FIX: ensure root node is first
                 nodes = list(graph.nodes())
+                nodes = sorted(nodes, key=lambda n: graph.nodes[n]["depth"])
 
                 adj = build_adjacency(graph, nodes)
+
+                # ✅ DropEdge (optional but useful)
+                adj = drop_edge(adj, 0.2)
+
                 adj_rev = adj.T
                 features = build_node_features(graph, nodes)
 
@@ -72,7 +83,9 @@ class BiGCNTrainer:
 
                     graph = event
 
+                    # ✅ FIX: ensure root node is first
                     nodes = list(graph.nodes())
+                    nodes = sorted(nodes, key=lambda n: graph.nodes[n]["depth"])
 
                     adj = build_adjacency(graph, nodes)
                     adj_rev = adj.T
@@ -112,7 +125,6 @@ class BiGCNTrainer:
     def predict(self, events):
 
         self.model.eval()
-
         preds = []
 
         with torch.no_grad():
@@ -120,7 +132,9 @@ class BiGCNTrainer:
 
                 graph = event
 
+                # ✅ FIX: ensure root node is first
                 nodes = list(graph.nodes())
+                nodes = sorted(nodes, key=lambda n: graph.nodes[n]["depth"])
 
                 adj = build_adjacency(graph, nodes)
                 adj_rev = adj.T

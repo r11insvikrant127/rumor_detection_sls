@@ -15,35 +15,54 @@ class GCNLayer(nn.Module):
 
 class BiGCN(nn.Module):
     """
-    Paper-style: Bottom-Up + Top-Down GCN
+    Bi-Directional GCN for Rumor Detection
+
+    - Top-Down (Propagation)
+    - Bottom-Up (Dispersion)
+    - Root Feature Enhancement
     """
 
     def __init__(self, in_dim=32, hidden_dim=64, num_classes=2):
         super().__init__()
 
-        # Bottom-up
-        self.gcn1 = GCNLayer(in_dim, hidden_dim)
-        self.gcn2 = GCNLayer(hidden_dim, hidden_dim)
+        # Top-Down
+        self.td_gcn1 = GCNLayer(in_dim, hidden_dim)
+        self.td_gcn2 = GCNLayer(hidden_dim + in_dim, hidden_dim)
 
-        # Top-down
-        self.gcn3 = GCNLayer(in_dim, hidden_dim)
-        self.gcn4 = GCNLayer(hidden_dim, hidden_dim)
+        # Bottom-Up
+        self.bu_gcn1 = GCNLayer(in_dim, hidden_dim)
+        self.bu_gcn2 = GCNLayer(hidden_dim + in_dim, hidden_dim)
 
+        # Classifier
         self.fc = nn.Linear(hidden_dim * 2, num_classes)
 
     def forward(self, x, adj, adj_rev):
-        # Bottom-up
-        h1 = F.relu(self.gcn1(x, adj))
-        h1 = F.relu(self.gcn2(h1, adj))
+        """
+        x: [N, in_dim]
+        adj: parent -> child
+        adj_rev: child -> parent
+        """
 
-        # Top-down
-        h2 = F.relu(self.gcn3(x, adj_rev))
-        h2 = F.relu(self.gcn4(h2, adj_rev))
+        # ---------------- ROOT FEATURE ----------------
+        # assumes root node is first
+        root = x[0].unsqueeze(0)
+        root_expand = root.repeat(x.size(0), 1)
 
-        # Global pooling
-        h1 = torch.mean(h1, dim=0)
-        h2 = torch.mean(h2, dim=0)
+        # ---------------- TOP-DOWN ----------------
+        td = F.relu(self.td_gcn1(x, adj))
+        td = torch.cat([td, root_expand], dim=1)
+        td = F.relu(self.td_gcn2(td, adj))
 
-        h = torch.cat([h1, h2], dim=0)
+        # ---------------- BOTTOM-UP ----------------
+        bu = F.relu(self.bu_gcn1(x, adj_rev))
+        bu = torch.cat([bu, root_expand], dim=1)
+        bu = F.relu(self.bu_gcn2(bu, adj_rev))
+
+        # ---------------- POOLING ----------------
+        td = torch.mean(td, dim=0)
+        bu = torch.mean(bu, dim=0)
+
+        # ---------------- FUSION ----------------
+        h = torch.cat([td, bu], dim=0)
 
         return self.fc(h)
