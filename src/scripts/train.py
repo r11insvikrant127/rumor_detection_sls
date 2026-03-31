@@ -37,9 +37,6 @@ from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
-from src.preprocessing import fit_tfidf_bigcn
-from src.preprocessing import TreeBuilderBiGCN
-from src.preprocessing import build_node_features_bigcn
 from src.preprocessing import TreeBuilderRvNN
 from src.preprocessing.graph_builder_rvnn import build_node_features, fit_tfidf
 
