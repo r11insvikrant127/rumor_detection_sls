@@ -16,19 +16,17 @@ class TDrumorGCN(nn.Module):
 
         x1 = x.float()
         x = self.conv1(x, edge_index)
-        x2 = x
+        x2 = x  # pre-activation (paper-consistent)
 
         rootindex = data.rootindex
         batch = data.batch
-        ptr = data.ptr  # 🔥 CRITICAL FIX
 
         # ===== ROOT EXTEND (FIRST) =====
         root_extend = torch.zeros_like(x1, device=x.device)
 
         for b in range(batch.max().item() + 1):
-            start = ptr[b]
-            root = rootindex[b].item() + start
             mask = (batch == b)
+            root = rootindex[b].item()   # ✅ FIXED (NO ptr)
             root_extend[mask] = x1[root]
 
         x = torch.cat((x, root_extend), dim=1)
@@ -42,9 +40,8 @@ class TDrumorGCN(nn.Module):
         root_extend = torch.zeros_like(x, device=x.device)
 
         for b in range(batch.max().item() + 1):
-            start = ptr[b]
-            root = rootindex[b].item() + start
             mask = (batch == b)
+            root = rootindex[b].item()   # ✅ FIXED
             root_extend[mask] = x2[root]
 
         x = torch.cat((x, root_extend), dim=1)
@@ -65,19 +62,17 @@ class BUrumorGCN(nn.Module):
 
         x1 = x.float()
         x = self.conv1(x, edge_index)
-        x2 = x
+        x2 = x  # pre-activation
 
         rootindex = data.rootindex
         batch = data.batch
-        ptr = data.ptr  # 🔥 CRITICAL FIX
 
         # ===== ROOT EXTEND (FIRST) =====
         root_extend = torch.zeros_like(x1, device=x.device)
 
         for b in range(batch.max().item() + 1):
-            start = ptr[b]
-            root = rootindex[b].item() + start
             mask = (batch == b)
+            root = rootindex[b].item()   # ✅ FIXED
             root_extend[mask] = x1[root]
 
         x = torch.cat((x, root_extend), dim=1)
@@ -91,9 +86,8 @@ class BUrumorGCN(nn.Module):
         root_extend = torch.zeros_like(x, device=x.device)
 
         for b in range(batch.max().item() + 1):
-            start = ptr[b]
-            root = rootindex[b].item() + start
             mask = (batch == b)
+            root = rootindex[b].item()   # ✅ FIXED
             root_extend[mask] = x2[root]
 
         x = torch.cat((x, root_extend), dim=1)
@@ -110,7 +104,7 @@ class BiGCN(nn.Module):
         self.TD = TDrumorGCN(in_dim, hidden_dim)
         self.BU = BUrumorGCN(in_dim, hidden_dim)
 
-        # 🔥 CORRECT DIMENSION
+        # (TD + BU) → each gives 2*hidden_dim
         self.fc = nn.Linear(hidden_dim * 4, num_classes)
 
     def forward(self, data):
