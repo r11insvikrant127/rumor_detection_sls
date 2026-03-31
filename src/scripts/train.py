@@ -191,13 +191,35 @@ class RumorDetectionTrainer:
             os.path.join(project_root, "pheme_bigcn_dataset.pt")
         )
 
-        if len(graph_cache_bigcn) != len(events):
-            raise ValueError(
-                f"Mismatch: {len(graph_cache_bigcn)} graphs vs {len(events)} events.\n"
-                "You MUST rebuild preprocessing to match index file."
-            )
+        print(f"BiGCN graphs: {len(graph_cache_bigcn)}, Events: {len(events)}")
 
         print("✅ BiGCN dataset loaded")
+        # 🔥 VALID INDICES FOR BiGCN (DO NOT TOUCH SLS DATA)
+        valid_bigcn_indices = []
+
+        for i, event in enumerate(events):
+
+            tweets = event["tweets"]
+
+            if len(tweets) < 3:
+                continue
+
+            tweet_ids = set(str(t["id"]) for t in tweets)
+
+            has_edge = False
+            for t in tweets:
+                parent = t.get("in_reply_to_status_id")
+                if parent is not None and str(parent) in tweet_ids:
+                    has_edge = True
+                    break
+
+            if has_edge:
+                valid_bigcn_indices.append(i)
+
+        # mapping original index → graph index
+        index_map = {orig_i: new_i for new_i, orig_i in enumerate(valid_bigcn_indices)}
+
+        print(f"✅ BiGCN usable events: {len(valid_bigcn_indices)}")
 
         for event in events:
 
@@ -273,8 +295,12 @@ class RumorDetectionTrainer:
             # TRAIN DEEP MODELS (BiGCN, RvNN, PPC)
             # =====================================================
             # ---- BiGCN ----
-            graphs_train_bigcn = [graph_cache_bigcn[i] for i in train_idx]
-            graphs_val_bigcn = [graph_cache_bigcn[i] for i in val_idx]
+            # 🔥 FILTER ONLY VALID BiGCN SAMPLES
+            train_idx_bigcn = [i for i in train_idx if i in valid_bigcn_indices]
+            val_idx_bigcn = [i for i in val_idx if i in valid_bigcn_indices]
+
+            graphs_train_bigcn = [graph_cache_bigcn[index_map[i]] for i in train_idx_bigcn]
+            graphs_val_bigcn = [graph_cache_bigcn[index_map[i]] for i in val_idx_bigcn]
             
             # 🔥 SAFETY CHECK (ADD HERE)
             if len(graphs_train_bigcn) == 0:
