@@ -1,120 +1,166 @@
-import numpy as np
+import os
+import json
+import torch
+from tqdm import tqdm
 from sklearn.feature_extraction.text import TfidfVectorizer
+from torch_geometric.data import Data
+from datetime import datetime
 
-# =====================================================
-# GLOBAL TF-IDF VECTORIZER
-# =====================================================
-vectorizer = TfidfVectorizer(
-    max_features=3000,
-    stop_words="english"
-)
+# ===== PATH (COLAB) =====
+BASE_PATH = "data/processed/pheme_dataset"
 
+EVENTS = [
+    "charliehebdo",
+    "ferguson",
+    "germanwings-crash",
+    "ottawashooting",
+    "sydneysiege"
+]
 
-# =====================================================
-# FIT TF-IDF (CALL ONCE BEFORE TRAINING)
-# =====================================================
-def fit_tfidf(graphs):
+# ===== STEP 1: LOAD ALL TEXTS =====
+all_texts = []
+
+def collect_all_texts():
+    for event in EVENTS:
+        event_path = os.path.join(BASE_PATH, event)
+        for file in os.listdir(event_path):
+            if file.endswith(".json"):
+                with open(os.path.join(event_path, file), 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    all_texts.extend(data["texts"])
+
+collect_all_texts()
+
+# ===== STEP 2: TF-IDF =====
+vectorizer = TfidfVectorizer(max_features=5000)
+vectorizer.fit(all_texts)
+
+# ===== TIME PARSER =====
+def parse_time(time_str):
+    return datetime.strptime(time_str, "%a %b %d %H:%M:%S %z %Y")
+
+# ===== STEP 3: BUILD GRAPH =====
+def process_json(file_path):
+    with open(file_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    tweets = data["tweets"]
+
+    id2idx = {}
     texts = []
 
-    for graph in graphs:
-        for _, data in graph.nodes(data=True):
-            text = data.get("text", "")
+    for i, tweet in enumerate(tweets):
+        id2idx[tweet["id"]] = i
+        texts.append(tweet["text"])
 
-            # ✅ CLEAN TEXT
-            if text is None:
-                continue
+    # ===== NODE FEATURES =====
+    x = vectorizer.transform(texts).toarray()
+    x = torch.tensor(x, dtype=torch.float)
 
-            text = str(text).strip()
+    # ===== EDGES (TD) =====
+    edges = []
+    for tweet in tweets:
+        parent = tweet["in_reply_to_status_id"]
+        child = tweet["id"]
 
-            # skip empty / very short
-            if len(text) < 3:
-                continue
+        if parent is not None and parent in id2idx:
+            edges.append([id2idx[parent], id2idx[child]])
 
-            texts.append(text)
+    if len(edges) == 0:
+        return None
 
-    print(f"[TF-IDF] Valid texts: {len(texts)}")
+    edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
 
-    if len(texts) == 0:
-        raise ValueError("❌ No valid text found for TF-IDF")
+    # ===== BU EDGES (IMPORTANT FOR BiGCN) =====
+    edge_index_bu = edge_index.flip(0)
 
-    vectorizer.fit(texts)
-    print("[TF-IDF] Done.")
+    # ===== ROOT NODE (IMPORTANT) =====
+    root_index = 0  # first tweet = source tweet
 
+    # ===== LABEL =====
+    y = torch.tensor([data["label"]], dtype=torch.long)
 
-# =====================================================
-# BUILD NODE FEATURES
-# =====================================================
-def build_node_features(graph, node_list):
-    texts = []
-
-    for node in node_list:
-        data = graph.nodes[node]
-        text = data.get("text", "")
-
-        if text is None:
-            text = ""
-
-        text = str(text).strip()
-
-        if len(text) < 3:
-            text = "empty"
-
-        texts.append(text)
-
-    features = vectorizer.transform(texts)
-    return features.toarray().astype(np.float32)
+    return Data(
+        x=x,
+        edge_index=edge_index,      # TD
+        edge_index_bu=edge_index_bu, # BU
+        y=y,
+        root=torch.tensor([root_index])
+    ), data
 
 
-# =====================================================
-# BUILD ADJACENCY MATRIX (Bi-GCN CORRECT VERSION)
-# =====================================================
-def build_adjacency(graph, node_list):
-    n = len(node_list)
-    idx_map = {node: i for i, node in enumerate(node_list)}
+# ===== STEP 4: CREATE DATASET =====
+dataset = []
+raw_data_info = []
 
-    adj = np.zeros((n, n), dtype=np.float32)
+for event in EVENTS:
+    event_path = os.path.join(BASE_PATH, event)
 
-    # Directed edges (parent -> child)
-    for u, v in graph.edges():
-        if u in idx_map and v in idx_map:
-            adj[idx_map[u], idx_map[v]] = 1.0
+    for file in tqdm(os.listdir(event_path), desc=f"Processing {event}"):
+        if file.endswith(".json"):
+            path = os.path.join(event_path, file)
+            result = process_json(path)
 
-    # -------------------------------
-    # ADD SELF-LOOPS
-    # -------------------------------
-    adj = adj + np.eye(n, dtype=np.float32)
+            if result is not None:
+                graph, raw = result
+                dataset.append(graph)
+                raw_data_info.append(raw)
 
-    # -------------------------------
-    # SYMMETRIC NORMALIZATION
-    # A_hat = D^(-1/2) A D^(-1/2)
-    # -------------------------------
-    degree = np.sum(adj, axis=1)
-    d_inv_sqrt = np.power(degree + 1e-6, -0.5)
-    d_mat = np.diag(d_inv_sqrt)
-
-    adj = d_mat @ adj @ d_mat
-
-    return adj
+print(f"\nTotal graphs: {len(dataset)}")
 
 
-def build_raw_adjacency(graph, node_list):
-    n = len(node_list)
-    idx_map = {node: i for i, node in enumerate(node_list)}
+# ===== STEP 5: PRINT STATS =====
+def print_stats(raw_data_info):
+    num_events = len(raw_data_info)
+    num_posts = 0
+    users = set()
 
-    adj = np.zeros((n, n), dtype=np.float32)
+    rumor_count = 0
+    non_rumor_count = 0
 
-    for u, v in graph.edges():
-        if u in idx_map and v in idx_map:
-            adj[idx_map[u], idx_map[v]] = 1.0
+    posts_per_event = []
+    time_lengths = []
 
-    # self-loops
-    adj = adj + np.eye(n, dtype=np.float32)
+    for data in raw_data_info:
+        tweets = data["tweets"]
 
-    return adj
+        num_posts += len(tweets)
+        posts_per_event.append(len(tweets))
+
+        # users
+        for t in tweets:
+            users.add(t["user"]["id"])
+
+        # labels
+        if data["label"] == 1:
+            rumor_count += 1
+        else:
+            non_rumor_count += 1
+
+        # time
+        try:
+            times = [parse_time(t["created_at"]) for t in tweets]
+            diff = (max(times) - min(times)).total_seconds() / 3600.0
+            time_lengths.append(diff)
+        except:
+            continue
+
+    print("\n===== DATASET STATISTICS =====")
+    print(f"# of posts: {num_posts}")
+    print(f"# of users: {len(users)}")
+    print(f"# of events: {num_events}")
+    print(f"# of Rumors: {rumor_count}")
+    print(f"# of Non-rumors: {non_rumor_count}")
+    print(f"Avg # of posts / event: {sum(posts_per_event)/len(posts_per_event):.2f}")
+    print(f"Max # of posts / event: {max(posts_per_event)}")
+    print(f"Min # of posts / event: {min(posts_per_event)}")
+
+    if len(time_lengths) > 0:
+        print(f"Avg time length / event (hours): {sum(time_lengths)/len(time_lengths):.2f}")
 
 
-def normalize_adjacency(adj):
-    degree = np.sum(adj, axis=1)
-    d_inv_sqrt = np.power(degree + 1e-6, -0.5)
-    d_mat = np.diag(d_inv_sqrt)
-    return d_mat @ adj @ d_mat
+print_stats(raw_data_info)
+
+
+# ===== SAVE =====
+torch.save(dataset, "pheme_bigcn_dataset.pt")
