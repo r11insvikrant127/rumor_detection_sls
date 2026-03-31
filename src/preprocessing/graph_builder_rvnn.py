@@ -3,9 +3,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 
 # =====================================================
-# GLOBAL TF-IDF VECTORIZER
+# TF-IDF (PAPER SETTING)
 # =====================================================
-# 🔥 Paper uses vocab size = 5000
 vectorizer = TfidfVectorizer(
     max_features=5000,
     stop_words="english"
@@ -13,85 +12,148 @@ vectorizer = TfidfVectorizer(
 
 
 # =====================================================
-# ADJACENCY MATRIX (USED BY GNN MODELS)
+# FIT TF-IDF (TRAIN ONLY)
 # =====================================================
-def build_adjacency(graph, node_list):
-    n = len(node_list)
-    idx_map = {node: i for i, node in enumerate(node_list)}
+def fit_tfidf(root_nodes):
 
-    adj = np.zeros((n, n), dtype=np.float32)
-
-    for u, v in graph.edges():
-        if u in idx_map and v in idx_map:
-            adj[idx_map[u], idx_map[v]] = 1.0
-
-    # Row-normalize
-    row_sum = adj.sum(axis=1, keepdims=True) + 1e-6
-    adj = adj / row_sum
-
-    return adj
-
-
-# =====================================================
-# CLEAN TEXT (FIXED & SAFE)
-# =====================================================
-def _clean_text(text):
-    if text is None:
-        return None
-
-    text = str(text).strip()
-
-    # Remove completely empty text
-    if len(text) == 0:
-        return None
-
-    # 🔥 Keep short texts like "fake", "true", etc.
-    return text
-
-
-# =====================================================
-# FIT TF-IDF ON TRAINING DATA
-# =====================================================
-def fit_tfidf(graphs):
     texts = []
 
-    for graph in graphs:
-        for _, data in graph.nodes(data=True):
-            text = _clean_text(data.get("text", ""))
+    def collect(node):
+        if node.text:
+            texts.append(node.text)
+        for child in node.children:
+            collect(child)
 
-            if text is not None:
-                texts.append(text)
+    for root in root_nodes:
+        collect(root)
 
     print(f"[TF-IDF] Valid texts: {len(texts)}")
 
     if len(texts) == 0:
-        raise ValueError("No valid text found for TF-IDF!")
+        raise ValueError("No valid text found!")
 
     vectorizer.fit(texts)
     print("[TF-IDF] Done.")
 
 
 # =====================================================
-# BUILD NODE FEATURES (ORDER SAFE)
+# ASSIGN SPARSE TF-IDF (CRITICAL)
 # =====================================================
-def build_node_features(graph, node_list):
+def assign_tfidf_to_nodes(root_node):
 
-    # 🔥 Ensure TF-IDF is fitted
-    if not hasattr(vectorizer, "vocabulary_") or vectorizer.vocabulary_ is None:
-        raise ValueError("TF-IDF vectorizer is not fitted!")
+    def dfs(node):
+        vec = vectorizer.transform([node.text])
 
-    texts = []
+        # HANDLE EMPTY VECTOR
+        if len(vec.indices) == 0:
+            node.word = [0.0]
+            node.index = [0]
+        else:
+            node.word = vec.data.tolist()
+            node.index = vec.indices.tolist()
 
-    # 🔥 MUST follow node_list order (topological order)
-    for node in node_list:
-        data = graph.nodes[node]
-        text = _clean_text(data.get("text", ""))
+        for child in node.children:
+            dfs(child)
 
-        if text is None:
-            text = "empty tweet"
+    dfs(root_node)
 
-        texts.append(text)
 
-    features = vectorizer.transform(texts)
+# =====================================================
+# AUTHOR TREE LOGIC
+# =====================================================
+def _clear_indices(root_node):
+    root_node.idx = None
+    for child in root_node.children:
+        if child:
+            _clear_indices(child)
 
-    return features.toarray().astype(np.float32)
+
+def _get_leaf_vals(root_node):
+    all_leaves = []
+    layer = [root_node]
+
+    while layer:
+        next_layer = []
+        for node in layer:
+            if not node.children:
+                all_leaves.append(node)
+            else:
+                next_layer.extend([child for child in node.children[::-1]])
+        layer = next_layer
+
+    X_word, X_index = [], []
+
+    for idx, leaf in enumerate(reversed(all_leaves)):
+        leaf.idx = idx
+        X_word.append(leaf.word)
+        X_index.append(leaf.index)
+
+    return X_word, X_index
+
+
+def _get_tree_traversal(root_node, start_idx):
+
+    layers = []
+    layer = [root_node]
+
+    while layer:
+        layers.append(layer[:])
+        next_layer = []
+        for node in layer:
+            next_layer.extend(node.children)
+        layer = next_layer
+
+    tree = []
+    internal_word = []
+    internal_index = []
+
+    idx = start_idx
+
+    for layer in reversed(layers):
+        for node in layer:
+
+            if node.idx is not None:
+                continue
+
+            # NO PADDING (IMPORTANT)
+            child_idxs = [child.idx for child in node.children]
+
+            node.idx = idx
+            tree.append(child_idxs + [node.idx])
+
+            internal_word.append(node.word)
+            internal_index.append(node.index)
+
+            idx += 1
+
+    return tree, internal_word, internal_index
+
+
+def gen_nn_inputs(root_node):
+    _clear_indices(root_node)
+
+    X_word, X_index = _get_leaf_vals(root_node)
+    tree, internal_word, internal_index = _get_tree_traversal(root_node, len(X_word))
+
+    X_word.extend(internal_word)
+    X_index.extend(internal_index)
+
+    return (
+        np.array(X_word, dtype=object),
+        np.array(X_index, dtype=object),
+        np.array(tree, dtype=object)
+    )
+
+
+# =====================================================
+# FINAL WRAPPER
+# =====================================================
+def build_rvnn_inputs(root_node):
+
+    X_word, X_index, tree = gen_nn_inputs(root_node)
+
+    return {
+        "X_word": X_word,
+        "X_index": X_index,
+        "tree": tree
+    }

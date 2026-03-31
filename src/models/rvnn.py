@@ -1,118 +1,98 @@
 import torch
 import torch.nn as nn
-import networkx as nx
 
 
-# =====================================================
-# TREE GRU CELL (Top-Down)
-# =====================================================
-class TreeGRUCell(nn.Module):
-
-    def __init__(self, input_dim, hidden_dim):
-        super().__init__()
-
-        self.W_r = nn.Linear(input_dim, hidden_dim)
-        self.U_r = nn.Linear(hidden_dim, hidden_dim)
-
-        self.W_z = nn.Linear(input_dim, hidden_dim)
-        self.U_z = nn.Linear(hidden_dim, hidden_dim)
-
-        self.W_h = nn.Linear(input_dim, hidden_dim)
-        self.U_h = nn.Linear(hidden_dim, hidden_dim)
-
-    def forward(self, x, h_parent):
-
-        r = torch.sigmoid(self.W_r(x) + self.U_r(h_parent))
-        z = torch.sigmoid(self.W_z(x) + self.U_z(h_parent))
-
-        h_tilde = torch.tanh(self.W_h(x) + self.U_h(h_parent * r))
-        h = (1 - z) * h_parent + z * h_tilde
-
-        return h
-
-
-# =====================================================
-# TOP-DOWN RvNN (FIXED + STABLE)
-# =====================================================
 class RvNN(nn.Module):
-
-    def __init__(self, input_dim=3000, hidden_dim=100, num_classes=2):
+    def __init__(self, vocab_size=5000, hidden_dim=100, num_classes=4):
         super().__init__()
 
         self.hidden_dim = hidden_dim
 
-        # TF-IDF → embedding
-        self.embedding = nn.Linear(input_dim, hidden_dim)
+        # Embedding matrix (paper-style sparse lookup)
+        self.E = nn.Parameter(torch.randn(hidden_dim, vocab_size) * 0.1)
 
-        # Tree GRU
-        self.tree_gru = TreeGRUCell(hidden_dim, hidden_dim)
+        # GRU parameters
+        self.W_z = nn.Linear(hidden_dim, hidden_dim)
+        self.U_z = nn.Linear(hidden_dim, hidden_dim)
 
-        # Learnable root initial state (better than zeros)
-        self.root_state = nn.Parameter(torch.zeros(hidden_dim))
+        self.W_r = nn.Linear(hidden_dim, hidden_dim)
+        self.U_r = nn.Linear(hidden_dim, hidden_dim)
+
+        self.W_h = nn.Linear(hidden_dim, hidden_dim)
+        self.U_h = nn.Linear(hidden_dim, hidden_dim)
 
         # Output layer
         self.out = nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, graph, features):
-        """
-        graph: networkx DiGraph (tree)
-        features: tensor [num_nodes, input_dim]
-        """
+    # -------------------------------------------------
+    # NODE UPDATE (GRU)
+    # -------------------------------------------------
+    def node_forward(self, word, index, child_h):
 
-        # -------------------------------------------------
-        # 1. Embed input features
-        # -------------------------------------------------
-        # 🔍 DEBUG SAFETY CHECK
-        if features.shape[1] != self.embedding.in_features:
-            raise ValueError(
-                f"Feature mismatch: got {features.shape[1]}, "
-                f"expected {self.embedding.in_features}"
+        # Sparse embedding lookup
+        xe = torch.matmul(self.E[:, index], word)  # [hidden_dim]
+
+        h_tilde = torch.sum(child_h, dim=0)
+
+        z = torch.sigmoid(self.W_z(xe) + self.U_z(h_tilde))
+        r = torch.sigmoid(self.W_r(xe) + self.U_r(h_tilde))
+
+        c = torch.tanh(self.W_h(xe) + self.U_h(h_tilde * r))
+        h = z * h_tilde + (1 - z) * c
+
+        return h
+
+    # -------------------------------------------------
+    # FORWARD (BOTTOM-UP)
+    # -------------------------------------------------
+    def forward(self, X_word, X_index, tree):
+
+        device = self.E.device
+        num_nodes = len(X_word)
+
+        h = [None] * num_nodes
+
+        # ---------------------------------
+        # PRE-CONVERT (EFFICIENCY)
+        # ---------------------------------
+        X_word = [torch.tensor(w, dtype=torch.float32, device=device) for w in X_word]
+        X_index = [torch.tensor(idx, dtype=torch.long, device=device) for idx in X_index]
+
+        # ---------------------------------
+        # LEAF NODES (PAPER-CORRECT ✅)
+        # ---------------------------------
+        num_leaves = len(X_word) - len(tree)
+
+        for i in range(num_leaves):
+            child_states = torch.zeros(1, self.hidden_dim, device=device)
+            h[i] = self.node_forward(X_word[i], X_index[i], child_states)
+
+        # ---------------------------------
+        # INTERNAL NODES
+        # ---------------------------------
+        for row in tree:
+            children = row[:-1]
+            parent = row[-1]
+
+            valid_children = [h[c] for c in children]
+
+
+            if len(valid_children) == 0:
+                raise ValueError(
+                    f"Invalid tree: node {parent} has no children"
+                )
+
+            child_states = torch.stack(valid_children)
+
+            h[parent] = self.node_forward(
+                X_word[parent],
+                X_index[parent],
+                child_states
             )
 
-        x = self.embedding(features)   # [N, hidden_dim]
+        # ---------------------------------
+        # ROOT
+        # ---------------------------------
+        root_state = h[len(X_word) - 1]
 
-        # -------------------------------------------------
-        # 2. Topological order (root → leaves)
-        # -------------------------------------------------
-        nodes = list(nx.topological_sort(graph))
-
-        # CRITICAL: map node → index
-        node_to_idx = {node: i for i, node in enumerate(nodes)}
-
-        # store hidden states
-        h = {}
-
-        # -------------------------------------------------
-        # 3. Top-down recursion
-        # -------------------------------------------------
-        for node in nodes:
-
-            idx = node_to_idx[node]
-            parents = list(graph.predecessors(node))
-
-            # Root node
-            if len(parents) == 0:
-                h_parent = self.root_state
-            else:
-                parent = parents[0]   # tree assumption
-                h_parent = h[parent]
-
-            h[node] = self.tree_gru(x[idx], h_parent)
-
-        # -------------------------------------------------
-        # 4. Get leaf nodes
-        # -------------------------------------------------
-        leaves = [n for n in graph.nodes() if graph.out_degree(n) == 0]
-
-        # -------------------------------------------------
-        # 5. Max pooling over leaf representations
-        # -------------------------------------------------
-        h_leaves = torch.stack([h[n] for n in leaves])  # [num_leaves, hidden_dim]
-        h_pool, _ = torch.max(h_leaves, dim=0)
-
-        # -------------------------------------------------
-        # 6. Classification
-        # -------------------------------------------------
-        out = self.out(h_pool)   # [num_classes]
-
-        return out.unsqueeze(0)  # [1, num_classes]
+        return self.out(root_state).unsqueeze(0)

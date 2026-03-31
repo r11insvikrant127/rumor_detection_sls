@@ -1,65 +1,54 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import networkx as nx
-from src.preprocessing.graph_builder_rvnn import (
-    build_node_features,
-    fit_tfidf
+from src.preprocessing import (
+    fit_tfidf,
+    assign_tfidf_to_nodes,
+    build_rvnn_inputs
 )
 
 
 class RvNNTrainer:
 
-    def __init__(self, model, device="cuda", lr=1e-3, epochs=20, config=None):
+    def __init__(self, model, device="cuda", lr=0.005, epochs=50):
         self.model = model.to(device)
         self.device = device
         self.epochs = epochs
 
+        # ✅ KEEP CrossEntropy (better than paper MSE for classification)
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
-        # 🔥 Early stopping config
-        self.early_stop = True if config is None else config.get("early_stopping", True)
-        self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
+        # ✅ KEEP Adam (more stable than paper SGD)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
 
     # =====================================================
     # TRAIN
     # =====================================================
-    def train(self, events_train, labels_train, events_val, labels_val):
-        
-        print("🔧 Fitting TF-IDF...")
-        fit_tfidf(events_train)
-        print("✅ TF-IDF ready")
-        
-        # 🔍 DEBUG CHECK (ADD HERE)
-        print("\n🔍 CHECKING GRAPH NODE DATA:")
-        graph = events_train[0]
+    def train(self, roots_train, labels_train):
 
-        for _, data in graph.nodes(data=True):
-            print(data)
-            break
-        best_loss = float("inf")
-        best_state = None
-        no_improve = 0
+        print("🔧 Fitting TF-IDF...")
+        fit_tfidf(roots_train)
 
         for epoch in range(self.epochs):
 
-            # -------- TRAIN --------
-            self.model.train()
             total_loss = 0
+            self.model.train()
 
-            for graph, label in zip(events_train, labels_train):
+            for root, label in zip(roots_train, labels_train):
 
-                import networkx as nx
+                # ---- Assign TF-IDF ----
+                assign_tfidf_to_nodes(root)
 
-                nodes = list(nx.topological_sort(graph))
-                features = build_node_features(graph, nodes)
+                # ---- Convert to RvNN input ----
+                data = build_rvnn_inputs(root)
 
-                x = torch.tensor(features, dtype=torch.float32).to(self.device)
-                y = torch.tensor([label], dtype=torch.long).to(self.device)
+                X_word = data["X_word"]
+                X_index = data["X_index"]
+                tree = data["tree"]
 
-                # ✅ IMPORTANT FIX: pass graph
-                out = self.model(graph, x)
+                y = torch.tensor([label], dtype=torch.long, device=self.device)
+
+                out = self.model(X_word, X_index, tree)
 
                 loss = self.criterion(out, y)
 
@@ -69,64 +58,27 @@ class RvNNTrainer:
 
                 total_loss += loss.item()
 
-            train_loss = total_loss / len(events_train)
-
-            # -------- VALIDATION --------
-            self.model.eval()
-            val_loss = 0
-
-            with torch.no_grad():
-                for graph, label in zip(events_val, labels_val):
-
-                    nodes = list(nx.topological_sort(graph))
-                    features = build_node_features(graph, nodes)
-
-                    x = torch.tensor(features, dtype=torch.float32).to(self.device)
-                    y = torch.tensor([label], dtype=torch.long).to(self.device)
-
-                    # ✅ IMPORTANT FIX: pass graph
-                    out = self.model(graph, x)
-
-                    loss = self.criterion(out, y)
-                    val_loss += loss.item()
-
-            val_loss = val_loss / len(events_val)
-
-            print(f"[RvNN] Epoch {epoch+1} Train: {train_loss:.4f} | Val: {val_loss:.4f}")
-
-            # -------- EARLY STOPPING --------
-            if val_loss < best_loss:
-                best_loss = val_loss
-                best_state = self.model.state_dict()
-                no_improve = 0
-            else:
-                no_improve += 1
-
-            if self.early_stop and no_improve >= self.patience:
-                print(f"[RvNN] Early stopping at epoch {epoch+1}")
-                break
-
-        if best_state is not None:
-            self.model.load_state_dict(best_state)
+            print(f"[RvNN] Epoch {epoch+1} Loss: {total_loss / len(roots_train):.4f}")
 
     # =====================================================
     # PREDICT
     # =====================================================
-    def predict(self, events):
+    def predict(self, roots):
 
         self.model.eval()
         preds = []
 
         with torch.no_grad():
-            for graph in events:
+            for root in roots:
 
-                nodes = list(nx.topological_sort(graph))
-                features = build_node_features(graph, nodes)
+                assign_tfidf_to_nodes(root)
+                data = build_rvnn_inputs(root)
 
-                x = torch.tensor(features, dtype=torch.float32).to(self.device)
-
-                # ✅ IMPORTANT FIX: pass graph
-                out = self.model(graph, x)
+                out = self.model(
+                    data["X_word"],
+                    data["X_index"],
+                    data["tree"]
+                )
 
                 preds.append(torch.argmax(out, dim=1).item())
 

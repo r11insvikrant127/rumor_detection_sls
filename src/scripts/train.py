@@ -9,7 +9,6 @@ import os
 import json
 import numpy as np
 import torch
-import networkx as nx
 import pandas as pd
 from pathlib import Path
 from sklearn.model_selection import StratifiedKFold
@@ -38,7 +37,6 @@ from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
 from src.preprocessing import TreeBuilderRvNN
-from src.preprocessing.graph_builder_rvnn import build_node_features, fit_tfidf
 
 
 from sklearn.svm import LinearSVC
@@ -142,6 +140,7 @@ class RumorDetectionTrainer:
             features.append(feat)
             labels.append(int(row["label"]))
             events.append(event)
+            event["file_path"] = row["file_path"]  # Add file path for rvnn only
 
         X = np.nan_to_num(np.array(features, dtype=np.float32))
         y = np.array(labels)
@@ -231,12 +230,9 @@ class RumorDetectionTrainer:
             graph_cache_ppc.append(graph_ppc)
             
             # RvNN graph (WITH TEXT)
-            graph_rvnn = tree_builder_rvnn.build(
-                tweets=event["tweets"],
-                source_id=event["source_id"]
-            )
-            graph_cache_rvnn.append(graph_rvnn)
-
+            file_path = Path(project_root) / event["file_path"]
+            root_rvnn = tree_builder_rvnn.build_from_json(str(file_path))
+            graph_cache_rvnn.append(root_rvnn)
 
         print("✅ Graph caches ready")
   
@@ -315,9 +311,7 @@ class RumorDetectionTrainer:
             graphs_val_ppc = [graph_cache_ppc[i] for i in val_idx]
             graphs_train_rvnn = [graph_cache_rvnn[i] for i in train_idx]
             graphs_val_rvnn = [graph_cache_rvnn[i] for i in val_idx]
-            # 🔧 Fit TF-IDF for RvNN (VERY IMPORTANT)
-            print("🔧 Fitting TF-IDF for RvNN (fold-wise)...")
-            fit_tfidf(graphs_train_rvnn)
+            
 
             # ---- BiGCN ----
             bigcn_trainer = BiGCNTrainer(
@@ -330,20 +324,13 @@ class RumorDetectionTrainer:
             preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
 
             # ---- RvNN ----
-            # 🔧 Get RvNN input dim dynamically (LIKE BIGCN)
-            sample_graph = graphs_train_rvnn[0]
-            nodes = list(nx.topological_sort(sample_graph))
-            sample_features = build_node_features(sample_graph, nodes)
-            rvnn_in_dim = sample_features.shape[1]
-
-            print(f"🔧 RvNN input dim: {rvnn_in_dim}")
 
             rvnn_trainer = RvNNTrainer(
-                RvNN(input_dim=rvnn_in_dim, hidden_dim=100),
+                RvNN(vocab_size=5000, hidden_dim=100, num_classes=2),
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            rvnn_trainer.train(graphs_train_rvnn, y_train, graphs_val_rvnn, y_val)
+            rvnn_trainer.train(graphs_train_rvnn, y_train)
             preds_rvnn = rvnn_trainer.predict(graphs_val_rvnn)
 
             # ---- PPC ----
