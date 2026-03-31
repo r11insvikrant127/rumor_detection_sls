@@ -4,21 +4,6 @@ from datetime import datetime
 
 
 class TreeBuilderPPC:
-    """
-    PPC-SPECIFIC Propagation Builder
-
-    Paper requirement:
-    ------------------
-    Each node must contain:
-    - time (relative propagation time)
-    - features (user feature vector)
-
-    Output:
-    -------
-    Graph with:
-        node["time"]
-        node["features"]
-    """
 
     def __init__(self):
         self.graph = nx.DiGraph()
@@ -48,7 +33,6 @@ class TreeBuilderPPC:
 
         user = tweet.get("user", {})
 
-        # -------- REGISTRATION AGE --------
         created_at = self._parse_time(tweet.get("created_at"))
         user_created = self._parse_time(user.get("created_at"))
 
@@ -61,10 +45,10 @@ class TreeBuilderPPC:
             user.get("followers_count", 0),
             user.get("friends_count", 0),
             user.get("statuses_count", 0),
-            reg_age,  
+            reg_age,
             int(user.get("verified", False)),
-            len(user.get("description", "") or ""),
-            len(user.get("screen_name", "") or ""),
+            len((user.get("description") or "")),
+            len((user.get("screen_name") or "")),
             int(user.get("geo_enabled", False)),
         ]
 
@@ -90,11 +74,16 @@ class TreeBuilderPPC:
                 source_time = self._parse_time(tweet.get("created_at"))
                 break
 
-        # fallback if missing
-        if source_time is None:
-            source_time = datetime.utcnow()
+        valid_times = [
+            self._parse_time(t.get("created_at"))
+            for t in tweets
+            if self._parse_time(t.get("created_at")) is not None
+        ]
 
-        # ---------- PASS 1: ADD NODES ----------
+        if source_time is None:
+            source_time = min(valid_times) if len(valid_times) > 0 else datetime.utcnow()
+
+        # ---------- ADD NODES ----------
         for tweet in tweets:
 
             tweet_id = self._normalize_id(
@@ -104,44 +93,23 @@ class TreeBuilderPPC:
             if not tweet_id or tweet_id in seen_ids:
                 continue
 
-            seen_ids.add(tweet_id)
-
             created_at = self._parse_time(tweet.get("created_at"))
 
-            # -------- RELATIVE TIME --------
-            if created_at:
-                time_delta = (created_at - source_time).total_seconds()
-            else:
-                time_delta = 0.0
+            # 🔴 IMPORTANT: skip invalid timestamps
+            if created_at is None:
+                continue
 
-            # -------- FEATURES --------
+            seen_ids.add(tweet_id)
+
+            # -------- RELATIVE TIME (minutes) --------
+            time_delta = (created_at - source_time).total_seconds() / 60.0
+
             features = self._extract_user_features(tweet)
 
             self.graph.add_node(
                 tweet_id,
-                time=float(time_delta),     # 🔥 REQUIRED
-                features=features,          # 🔥 REQUIRED
+                time=float(time_delta),
+                features=features,
             )
-
-        # ---------- PASS 2: ADD EDGES ----------
-        for tweet in tweets:
-
-            child_id = self._normalize_id(
-                tweet.get("id", tweet.get("tweet_id"))
-            )
-
-            if child_id not in self.graph.nodes():
-                continue
-
-            parent_id = self._normalize_id(
-                tweet.get("in_reply_to_status_id")
-            )
-
-            if (
-                parent_id
-                and parent_id in self.graph.nodes()
-                and parent_id != child_id
-            ):
-                self.graph.add_edge(parent_id, child_id)
 
         return self.graph

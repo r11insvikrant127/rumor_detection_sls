@@ -17,7 +17,7 @@ class PPCTrainer:
 
         self.tree_builder = TreeBuilderPPC()
 
-        self.max_len = 40
+        self.max_len = 25  # 🔴 better for PHEME
 
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
@@ -38,24 +38,32 @@ class PPCTrainer:
 
         for _, attr in nodes:
             feat = attr.get("features", None)
-            time = attr.get("time", 0.0)
 
-            if feat is not None:
-                features.append(feat + [time])
+            if feat is not None and len(feat) == 8:
+                features.append(feat)
 
         if len(features) == 0:
-            return np.zeros((self.max_len, self.model.gru.input_size), dtype=np.float32)
+            return np.zeros((self.max_len, 8), dtype=np.float32)
 
         features = np.array(features, dtype=np.float32)
-
-        # -------- TRUNCATE / PAD --------
+        
+        # -------- TRUNCATE / OVERSAMPLE --------
         if len(features) >= self.max_len:
             features = features[:self.max_len]
         else:
             pad_len = self.max_len - len(features)
-            indices = np.random.choice(len(features), pad_len, replace=True)
+
+            # 🔴 safer sampling
+            indices = np.random.randint(0, len(features), size=pad_len)
             extra = features[indices]
+
             features = np.concatenate([features, extra], axis=0)
+            
+        # -------- NORMALIZATION --------
+        features[:, 0:3] = np.log1p(features[:, 0:3])   # followers, friends, statuses
+        features[:, 3] = features[:, 3] / 3650.0        # reg age (~10 yrs)
+        features[:, 5] = features[:, 5] / 100.0         # description length
+        features[:, 6] = features[:, 6] / 50.0          # username length
 
         return features
 
@@ -64,7 +72,6 @@ class PPCTrainer:
     # ==================================================
     def train(self, events_train, labels_train, events_val, labels_val):
 
-        # -------- CLASS WEIGHTS --------
         class_counts = np.bincount(labels_train)
         weights = class_counts.sum() / (len(class_counts) * class_counts)
 
@@ -80,12 +87,10 @@ class PPCTrainer:
 
         for epoch in range(self.epochs):
 
-            # -------- SHUFFLE (IMPORTANT) --------
             perm = np.random.permutation(len(events_train))
             events_train = [events_train[i] for i in perm]
             labels_train = labels_train[perm]
 
-            # -------- TRAIN --------
             self.model.train()
             total_loss = 0
 
@@ -110,8 +115,7 @@ class PPCTrainer:
 
                 total_loss += loss.item()
 
-            num_batches = int(np.ceil(len(events_train) / self.batch_size))
-            train_loss = total_loss / num_batches
+            train_loss = total_loss / int(np.ceil(len(events_train) / self.batch_size))
 
             # -------- VALIDATION --------
             self.model.eval()
@@ -135,8 +139,7 @@ class PPCTrainer:
 
                     val_loss += loss.item()
 
-            num_val_batches = int(np.ceil(len(events_val) / self.batch_size))
-            val_loss = val_loss / num_val_batches
+            val_loss = val_loss / int(np.ceil(len(events_val) / self.batch_size))
 
             print(f"[PPC] Epoch {epoch+1} Train: {train_loss:.4f} | Val: {val_loss:.4f}")
 
