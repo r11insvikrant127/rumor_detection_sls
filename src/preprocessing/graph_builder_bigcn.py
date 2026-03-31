@@ -6,7 +6,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from torch_geometric.data import Data
 from datetime import datetime
 
-# ===== PATH (COLAB) =====
+# ===== PATH =====
 BASE_PATH = "data/processed/pheme_dataset"
 
 EVENTS = [
@@ -31,7 +31,7 @@ def collect_all_texts():
 
 collect_all_texts()
 
-# ===== STEP 2: TF-IDF =====
+# ===== STEP 2: TF-IDF (5000 like paper) =====
 vectorizer = TfidfVectorizer(max_features=5000)
 vectorizer.fit(all_texts)
 
@@ -46,6 +46,13 @@ def process_json(file_path):
 
     tweets = data["tweets"]
 
+    # ===== SORT BY TIME =====
+    tweets = sorted(tweets, key=lambda x: parse_time(x["created_at"]))
+
+    # ===== FILTER SMALL TREES =====
+    if len(tweets) < 3:
+        return None
+
     id2idx = {}
     texts = []
 
@@ -57,7 +64,7 @@ def process_json(file_path):
     x = vectorizer.transform(texts).toarray()
     x = torch.tensor(x, dtype=torch.float)
 
-    # ===== EDGES (TD) =====
+    # ===== TD EDGES =====
     edges = []
     for tweet in tweets:
         parent = tweet["in_reply_to_status_id"]
@@ -71,21 +78,34 @@ def process_json(file_path):
 
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
 
-    # ===== BU EDGES (IMPORTANT FOR BiGCN) =====
-    edge_index_bu = edge_index.flip(0)
+    # ===== BU EDGES =====
+    BU_edge_index = edge_index.flip(0)
 
-    # ===== ROOT NODE (IMPORTANT) =====
-    root_index = 0  # first tweet = source tweet
+    # ===== ROOT INDEX (SAFE + CORRECT) =====
+    roots = [
+        i for i, t in enumerate(tweets)
+        if t["in_reply_to_status_id"] is None
+    ]
 
-    # ===== LABEL =====
-    y = torch.tensor([data["label"]], dtype=torch.long)
+    if len(roots) == 0:
+        return None
+
+    root_index = roots[0]
+
+    # ===== LABEL SAFE HANDLING =====
+    label = data["label"]
+    if isinstance(label, str):
+        label_map = {"non-rumor": 0, "rumor": 1}
+        label = label_map[label]
+
+    y = torch.tensor([label], dtype=torch.long)
 
     return Data(
         x=x,
-        edge_index=edge_index,      # TD
-        edge_index_bu=edge_index_bu, # BU
+        edge_index=edge_index,
+        BU_edge_index=BU_edge_index,
         y=y,
-        root=torch.tensor([root_index])
+        rootindex=torch.tensor([root_index])
     ), data
 
 
@@ -127,17 +147,20 @@ def print_stats(raw_data_info):
         num_posts += len(tweets)
         posts_per_event.append(len(tweets))
 
-        # users
         for t in tweets:
             users.add(t["user"]["id"])
 
-        # labels
-        if data["label"] == 1:
+        # ===== SAFE LABEL =====
+        label = data["label"]
+        if isinstance(label, str):
+            label_map = {"non-rumor": 0, "rumor": 1}
+            label = label_map[label]
+
+        if label == 1:
             rumor_count += 1
         else:
             non_rumor_count += 1
 
-        # time
         try:
             times = [parse_time(t["created_at"]) for t in tweets]
             diff = (max(times) - min(times)).total_seconds() / 3600.0
