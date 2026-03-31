@@ -1,102 +1,123 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_geometric.nn import GCNConv
+from torch_scatter import scatter_mean
 
 
-# =====================================================
-# BASIC GCN LAYER
-# =====================================================
-class GCNLayer(nn.Module):
-    def __init__(self, in_dim, out_dim):
+class TDrumorGCN(nn.Module):
+    def __init__(self, in_dim, hidden_dim):
         super().__init__()
-        self.linear = nn.Linear(in_dim, out_dim)
+        self.conv1 = GCNConv(in_dim, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim + in_dim, hidden_dim)
 
-    def forward(self, x, adj):
-        h = torch.matmul(adj, x)
-        return self.linear(h)
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+
+        x1 = x.float()
+        x = self.conv1(x, edge_index)
+        x2 = x
+
+        rootindex = data.rootindex
+        batch = data.batch
+        ptr = data.ptr  # 🔥 CRITICAL FIX
+
+        # ===== ROOT EXTEND (FIRST) =====
+        root_extend = torch.zeros_like(x1, device=x.device)
+
+        for b in range(batch.max().item() + 1):
+            start = ptr[b]
+            root = rootindex[b].item() + start
+            mask = (batch == b)
+            root_extend[mask] = x1[root]
+
+        x = torch.cat((x, root_extend), dim=1)
+        x = F.relu(x)
+        x = F.dropout(x, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        # ===== ROOT EXTEND (SECOND) =====
+        root_extend = torch.zeros_like(x, device=x.device)
+
+        for b in range(batch.max().item() + 1):
+            start = ptr[b]
+            root = rootindex[b].item() + start
+            mask = (batch == b)
+            root_extend[mask] = x2[root]
+
+        x = torch.cat((x, root_extend), dim=1)
+
+        x = scatter_mean(x, batch, dim=0)
+
+        return x
 
 
-# =====================================================
-# BI-GCN MODEL
-# =====================================================
+class BUrumorGCN(nn.Module):
+    def __init__(self, in_dim, hidden_dim):
+        super().__init__()
+        self.conv1 = GCNConv(in_dim, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim + in_dim, hidden_dim)
+
+    def forward(self, data):
+        x, edge_index = data.x, data.BU_edge_index
+
+        x1 = x.float()
+        x = self.conv1(x, edge_index)
+        x2 = x
+
+        rootindex = data.rootindex
+        batch = data.batch
+        ptr = data.ptr  # 🔥 CRITICAL FIX
+
+        # ===== ROOT EXTEND (FIRST) =====
+        root_extend = torch.zeros_like(x1, device=x.device)
+
+        for b in range(batch.max().item() + 1):
+            start = ptr[b]
+            root = rootindex[b].item() + start
+            mask = (batch == b)
+            root_extend[mask] = x1[root]
+
+        x = torch.cat((x, root_extend), dim=1)
+        x = F.relu(x)
+        x = F.dropout(x, training=self.training)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        # ===== ROOT EXTEND (SECOND) =====
+        root_extend = torch.zeros_like(x, device=x.device)
+
+        for b in range(batch.max().item() + 1):
+            start = ptr[b]
+            root = rootindex[b].item() + start
+            mask = (batch == b)
+            root_extend[mask] = x2[root]
+
+        x = torch.cat((x, root_extend), dim=1)
+
+        x = scatter_mean(x, batch, dim=0)
+
+        return x
+
+
 class BiGCN(nn.Module):
-    """
-    Bi-Directional GCN for Rumor Detection
-
-    ✔ Top-Down (Propagation)
-    ✔ Bottom-Up (Dispersion)
-    ✔ Root Feature Enhancement
-    ✔ Input Projection (for TF-IDF stability)
-    ✔ Dropout (paper uses this)
-    """
-
-    def __init__(self, in_dim=3000, hidden_dim=64, num_classes=2):
+    def __init__(self, in_dim=5000, hidden_dim=64, num_classes=2):
         super().__init__()
 
-        # ✅ INPUT PROJECTION (VERY IMPORTANT)
-        self.input_proj = nn.Linear(in_dim, hidden_dim)
+        self.TD = TDrumorGCN(in_dim, hidden_dim)
+        self.BU = BUrumorGCN(in_dim, hidden_dim)
 
-        # ---------------- TOP-DOWN ----------------
-        self.td_gcn1 = GCNLayer(hidden_dim, hidden_dim)
-        self.td_gcn2 = GCNLayer(hidden_dim + hidden_dim, hidden_dim)
+        # 🔥 CORRECT DIMENSION
+        self.fc = nn.Linear(hidden_dim * 4, num_classes)
 
-        # ---------------- BOTTOM-UP ----------------
-        self.bu_gcn1 = GCNLayer(hidden_dim, hidden_dim)
-        self.bu_gcn2 = GCNLayer(hidden_dim + hidden_dim, hidden_dim)
+    def forward(self, data):
+        td = self.TD(data)
+        bu = self.BU(data)
 
-        # ---------------- REGULARIZATION ----------------
-        self.dropout = nn.Dropout(0.5)
+        x = torch.cat((bu, td), dim=1)
+        x = self.fc(x)
 
-        # ---------------- CLASSIFIER ----------------
-        self.fc = nn.Linear(hidden_dim * 2, num_classes)
-
-    def forward(self, x, adj, adj_rev):
-        """
-        x: [N, in_dim]
-        adj: parent -> child
-        adj_rev: child -> parent
-        """
-
-        # =====================================================
-        # INPUT PROJECTION
-        # =====================================================
-        x = self.input_proj(x)   # [N, hidden_dim]
-
-        # =====================================================
-        # ROOT FEATURE (root is first node)
-        # =====================================================
-        root = x[0].unsqueeze(0)
-        root_expand = root.repeat(x.size(0), 1)
-
-        # =====================================================
-        # TOP-DOWN GCN
-        # =====================================================
-        td = F.relu(self.td_gcn1(x, adj))
-        td = self.dropout(td)
-
-        td = torch.cat([td, root_expand], dim=1)
-        td = F.relu(self.td_gcn2(td, adj))
-        td = self.dropout(td)
-
-        # =====================================================
-        # BOTTOM-UP GCN
-        # =====================================================
-        bu = F.relu(self.bu_gcn1(x, adj_rev))
-        bu = self.dropout(bu)
-
-        bu = torch.cat([bu, root_expand], dim=1)
-        bu = F.relu(self.bu_gcn2(bu, adj_rev))
-        bu = self.dropout(bu)
-
-        # =====================================================
-        # POOLING (graph-level representation)
-        # =====================================================
-        td = torch.mean(td, dim=0)
-        bu = torch.mean(bu, dim=0)
-
-        # =====================================================
-        # FUSION
-        # =====================================================
-        h = torch.cat([td, bu], dim=0)
-
-        return self.fc(h)
+        return x

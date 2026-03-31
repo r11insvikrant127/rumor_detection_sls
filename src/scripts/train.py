@@ -314,7 +314,7 @@ class RumorDetectionTrainer:
                 config=self.config.training.__dict__
             )
 
-            bigcn_trainer.train(graphs_train_bigcn, y_train, graphs_val_bigcn, y_val)
+            bigcn_trainer.train(graphs_train_bigcn, graphs_val_bigcn)
             preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
 
             # ---- RvNN ----

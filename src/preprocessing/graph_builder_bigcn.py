@@ -27,7 +27,9 @@ def collect_all_texts():
             if file.endswith(".json"):
                 with open(os.path.join(event_path, file), 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    all_texts.extend(data["texts"])
+
+                    texts = [data["source"]["text"]] + [r["text"] for r in data["replies"]]
+                    all_texts.extend(texts)
 
 collect_all_texts()
 
@@ -35,7 +37,7 @@ collect_all_texts()
 vectorizer = TfidfVectorizer(max_features=5000)
 vectorizer.fit(all_texts)
 
-# ===== TIME PARSER =====
+# ===== TIME PARSER (only for stats) =====
 def parse_time(time_str):
     return datetime.strptime(time_str, "%a %b %d %H:%M:%S %z %Y")
 
@@ -44,10 +46,8 @@ def process_json(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    tweets = data["tweets"]
-
-    # ===== SORT BY TIME =====
-    tweets = sorted(tweets, key=lambda x: parse_time(x["created_at"]))
+    # ===== BUILD TWEETS =====
+    tweets = [data["source"]] + data["replies"]
 
     # ===== FILTER SMALL TREES =====
     if len(tweets) < 3:
@@ -81,18 +81,17 @@ def process_json(file_path):
     # ===== BU EDGES =====
     BU_edge_index = edge_index.flip(0)
 
-    # ===== ROOT INDEX (SAFE + CORRECT) =====
-    roots = [
-        i for i, t in enumerate(tweets)
-        if t["in_reply_to_status_id"] is None
-    ]
-
-    if len(roots) == 0:
+    # ===== ROOT =====
+    root_id = data["source"]["id"]
+    if root_id not in id2idx:
         return None
 
-    root_index = roots[0]
+    root_index = id2idx[root_id]
 
-    # ===== LABEL SAFE HANDLING =====
+    # ===== ROOT FEATURE =====
+    root_feat = x[root_index]   # shape: [5000]
+
+    # ===== LABEL =====
     label = data["label"]
     if isinstance(label, str):
         label_map = {"non-rumor": 0, "rumor": 1}
@@ -105,6 +104,7 @@ def process_json(file_path):
         edge_index=edge_index,
         BU_edge_index=BU_edge_index,
         y=y,
+        root=root_feat,
         rootindex=torch.tensor([root_index])
     ), data
 
@@ -142,7 +142,7 @@ def print_stats(raw_data_info):
     time_lengths = []
 
     for data in raw_data_info:
-        tweets = data["tweets"]
+        tweets = [data["source"]] + data["replies"]
 
         num_posts += len(tweets)
         posts_per_event.append(len(tweets))
@@ -150,7 +150,6 @@ def print_stats(raw_data_info):
         for t in tweets:
             users.add(t["user"]["id"])
 
-        # ===== SAFE LABEL =====
         label = data["label"]
         if isinstance(label, str):
             label_map = {"non-rumor": 0, "rumor": 1}
@@ -183,7 +182,6 @@ def print_stats(raw_data_info):
 
 
 print_stats(raw_data_info)
-
 
 # ===== SAVE =====
 torch.save(dataset, "pheme_bigcn_dataset.pt")
