@@ -185,8 +185,19 @@ class RumorDetectionTrainer:
         graph_cache_rvnn = []
 
         # ---- BiGCN ----
-        tree_builder_bigcn = TreeBuilderBiGCN()
-        graph_cache_bigcn = []
+        print("🔄 Loading BiGCN dataset...")
+
+        graph_cache_bigcn = torch.load(
+            os.path.join(project_root, "pheme_bigcn_dataset.pt")
+        )
+
+        if len(graph_cache_bigcn) != len(events):
+            raise ValueError(
+                f"Mismatch: {len(graph_cache_bigcn)} graphs vs {len(events)} events.\n"
+                "You MUST rebuild preprocessing to match index file."
+            )
+
+        print("✅ BiGCN dataset loaded")
 
         for event in events:
 
@@ -204,23 +215,9 @@ class RumorDetectionTrainer:
             )
             graph_cache_rvnn.append(graph_rvnn)
 
-            # BiGCN graph (with text)
-            graph_bigcn = tree_builder_bigcn.build_from_tweets(
-                tweets=event["tweets"],
-                source_id=event["source_id"]
-            )
-            graph_cache_bigcn.append(graph_bigcn)
 
         print("✅ Graph caches ready")
-    
-
-        # 🔥 DEBUG CHECK (ADD HERE)
-        graph = graph_cache_bigcn[0]
-
-        print("\n🔍 BIGCN GRAPH CHECK:")
-        for node, attr in graph.nodes(data=True):
-            print(attr)
-            break
+  
         
         for fold, (train_idx, val_idx) in enumerate(skf.split(X, y), 1):
 
@@ -278,20 +275,12 @@ class RumorDetectionTrainer:
             # ---- BiGCN ----
             graphs_train_bigcn = [graph_cache_bigcn[i] for i in train_idx]
             graphs_val_bigcn = [graph_cache_bigcn[i] for i in val_idx]
-
-            print("🔧 Fitting TF-IDF (fold-wise)...")
-            fit_tfidf_bigcn(graphs_train_bigcn)
-
-            # 🔧 Get dynamic input dimension for BiGCN
-            sample_graph = graphs_train_bigcn[0]
-
-            sample_nodes = sorted(
-                sample_graph.nodes(),
-                key=lambda n: sample_graph.nodes[n]["depth"]
-            )
-
-            sample_features = build_node_features_bigcn(sample_graph, sample_nodes)
-            in_dim = sample_features.shape[1]
+            
+            # 🔥 SAFETY CHECK (ADD HERE)
+            if len(graphs_train_bigcn) == 0:
+                continue
+            # 🔧 Input dimension directly from PyG Data
+            in_dim = graphs_train_bigcn[0].x.shape[1]
 
             print(f"🔧 BiGCN input dim: {in_dim}")
 
