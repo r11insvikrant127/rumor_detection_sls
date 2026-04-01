@@ -327,8 +327,7 @@ class RumorDetectionTrainer:
 
             rvnn_trainer = RvNNTrainer(
                 RvNN(vocab_size=5000, hidden_dim=100, num_classes=2),
-                device=self.device,
-                config=self.config.training.__dict__
+                device=self.device
             )
             rvnn_trainer.train(graphs_train_rvnn, y_train)
             preds_rvnn = rvnn_trainer.predict(graphs_val_rvnn)
