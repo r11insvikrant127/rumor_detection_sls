@@ -344,8 +344,11 @@ class RumorDetectionTrainer:
             print("PPC check:", len(y_val), len(preds_ppc))
 
             # ---- store metrics ----
+            # 🔴 FIX: align labels with filtered BiGCN indices
+            y_val_bigcn = y[val_idx_bigcn]
+
             all_model_results["BiGCN"].append(
-                Evaluator.compute_metrics(y_val, preds_bigcn)
+                Evaluator.compute_metrics(y_val_bigcn, preds_bigcn)
             )
 
             all_model_results["RvNN"].append(
