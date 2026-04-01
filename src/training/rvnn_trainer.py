@@ -29,6 +29,11 @@ class RvNNTrainer:
         print("🔧 Fitting TF-IDF...")
         fit_tfidf(roots_train)
 
+        best_loss = float("inf")
+        patience = 5
+        no_improve = 0
+        best_state = None
+
         for epoch in range(self.epochs):
 
             total_loss = 0
@@ -36,20 +41,16 @@ class RvNNTrainer:
 
             for root, label in zip(roots_train, labels_train):
 
-                # ---- Assign TF-IDF ----
                 assign_tfidf_to_nodes(root)
-
-                # ---- Convert to RvNN input ----
                 data = build_rvnn_inputs(root)
 
                 X_word = data["X_word"]
                 X_index = data["X_index"]
                 tree = data["tree"]
 
-                y = torch.tensor([label], dtype=torch.long, device=self.device)
+                y = torch.tensor([label], dtype=torch.long).to(self.device)
 
                 out = self.model(X_word, X_index, tree)
-
                 loss = self.criterion(out, y)
 
                 self.optimizer.zero_grad()
@@ -58,7 +59,24 @@ class RvNNTrainer:
 
                 total_loss += loss.item()
 
-            print(f"[RvNN] Epoch {epoch+1} Loss: {total_loss / len(roots_train):.4f}")
+            epoch_loss = total_loss / len(roots_train)
+
+            print(f"[RvNN] Epoch {epoch+1} Loss: {epoch_loss:.4f}")
+
+            # 🔴 EARLY STOPPING
+            if epoch_loss < best_loss:
+                best_loss = epoch_loss
+                best_state = self.model.state_dict()
+                no_improve = 0
+            else:
+                no_improve += 1
+
+            if no_improve >= patience:
+                print(f"[RvNN] Early stopping at epoch {epoch+1}")
+                break
+        if best_state is not None:
+            self.model.load_state_dict(best_state)
+            print(f"[RvNN] Best Loss: {best_loss:.4f}")
 
     # =====================================================
     # PREDICT
