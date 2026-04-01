@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 class RvNN(nn.Module):
@@ -55,8 +56,19 @@ class RvNN(nn.Module):
         # ---------------------------------
         # PRE-CONVERT (EFFICIENCY)
         # ---------------------------------
-        X_word = [torch.tensor(w, dtype=torch.float32, device=device) for w in X_word]
-        X_index = [torch.tensor(idx, dtype=torch.long, device=device) for idx in X_index]
+        X_word = [
+            torch.tensor(w.tolist() if isinstance(w, np.ndarray) else w,
+                        dtype=torch.float32,
+                        device=device)
+            for w in X_word
+        ]
+
+        X_index = [
+            torch.tensor(idx.tolist() if isinstance(idx, np.ndarray) else idx,
+                        dtype=torch.long,
+                        device=device)
+            for idx in X_index
+]
 
         # ---------------------------------
         # LEAF NODES (PAPER-CORRECT ✅)
