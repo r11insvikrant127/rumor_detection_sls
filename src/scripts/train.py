@@ -340,6 +340,8 @@ class RumorDetectionTrainer:
             )
             ppc_trainer.train(graphs_train_ppc, y_train, graphs_val_ppc, y_val)
             preds_ppc = ppc_trainer.predict(graphs_val_ppc)
+            
+            print("PPC check:", len(y_val), len(preds_ppc))
 
             # ---- store metrics ----
             all_model_results["BiGCN"].append(

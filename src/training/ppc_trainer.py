@@ -17,7 +17,7 @@ class PPCTrainer:
 
         self.tree_builder = TreeBuilderPPC()
 
-        self.max_len = 25  # 🔴 better for PHEME
+        self.max_len = 40
 
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
@@ -103,7 +103,7 @@ class PPCTrainer:
                     self.build_sequence(graph) for graph in batch_graphs
                 ]
 
-                x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
+                x = torch.from_numpy(np.array(batch_features)).float().to(self.device)
                 y = torch.tensor(batch_labels, dtype=torch.long).to(self.device)
 
                 out = self.model(x)
@@ -131,7 +131,7 @@ class PPCTrainer:
                         self.build_sequence(graph) for graph in batch_graphs
                     ]
 
-                    x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
+                    x = torch.from_numpy(np.array(batch_features)).float().to(self.device)
                     y = torch.tensor(batch_labels, dtype=torch.long).to(self.device)
 
                     out = self.model(x)
@@ -175,7 +175,7 @@ class PPCTrainer:
                     self.build_sequence(graph) for graph in batch_graphs
                 ]
 
-                x = torch.tensor(batch_features, dtype=torch.float32).to(self.device)
+                x = torch.from_numpy(np.array(batch_features)).float().to(self.device)
 
                 out = self.model(x)
                 preds.extend(torch.argmax(out, dim=1).cpu().numpy())

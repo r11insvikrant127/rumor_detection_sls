@@ -7,7 +7,7 @@ class PPC(nn.Module):
     def __init__(
         self,
         input_dim=8,     
-        gru_hidden=64,
+        gru_hidden=32,
         cnn_filters=32,
         kernel_size=3,
         num_classes=2
@@ -21,13 +21,13 @@ class PPC(nn.Module):
             batch_first=True
         )
 
-        # -------- CNN (LOCAL) --------
         self.conv = nn.Conv1d(
             input_dim,
             cnn_filters,
-            kernel_size=kernel_size
+            kernel_size=kernel_size,
+            padding=kernel_size // 2
         )
-
+        
         # -------- FINAL --------
         self.fc = nn.Sequential(
             nn.Linear(gru_hidden + cnn_filters, 64),
