@@ -135,7 +135,8 @@ class BiGCN(nn.Module):
         super().__init__()
         self.TD = TDrumorGCN(in_dim, hidden_dim)
         self.BU = BUrumorGCN(in_dim, hidden_dim)
-        self.fc = nn.Linear(hidden_dim * 4, num_classes)
+        final_dim = (hidden_dim + hidden_dim + in_dim) * 2
+        self.fc = nn.Linear(final_dim, num_classes)
 
     def forward(self, data):
         td = self.TD(data)
