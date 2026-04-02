@@ -130,13 +130,16 @@ def build_graph(data, vectorizer):
         label = {"non-rumor": 0, "rumor": 1}[label]
 
     y = torch.tensor([label], dtype=torch.long)
-
+    assert root_index < x.size(0), f"Root index {root_index} out of bounds {x.size(0)}"
+    if edge_index.numel() > 0:
+        assert edge_index.max() < x.size(0), "Edge index overflow!"
     return Data(
         x=x,
         edge_index=edge_index,
         BU_edge_index=BU_edge_index,
         y=y,
-        rootindex=torch.tensor([root_index])
+        rootindex=torch.tensor([root_index]),
+        num_nodes=x.size(0)
     )
     
 # =====================================================

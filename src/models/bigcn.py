@@ -40,6 +40,9 @@ class TDrumorGCN(nn.Module):
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
+            # ✅ SAFE GUARD
+            if root >= x0.size(0):
+                continue
             mask = (batch == b)
             root_extend[mask] = x0[root]
 
@@ -56,6 +59,9 @@ class TDrumorGCN(nn.Module):
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
+            # ✅ SAFE GUARD
+            if root >= x0.size(0):
+                continue
             mask = (batch == b)
             root_extend[mask] = H1[root]
 
@@ -93,6 +99,9 @@ class BUrumorGCN(nn.Module):
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
+            # ✅ SAFE GUARD
+            if root >= x0.size(0):
+                continue
             mask = (batch == b)
             root_extend[mask] = x0[root]
 
@@ -109,6 +118,9 @@ class BUrumorGCN(nn.Module):
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
+            # ✅ SAFE GUARD
+            if root >= x0.size(0):
+                continue
             mask = (batch == b)
             root_extend[mask] = H1[root]
 
