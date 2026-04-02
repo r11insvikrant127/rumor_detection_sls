@@ -6,18 +6,6 @@ from torch_geometric.loader import DataLoader
 from sklearn.metrics import f1_score
 
 
-# =====================================================
-# DROPEDGE (EDGE INDEX VERSION)
-# =====================================================
-def drop_edge(edge_index, drop_rate=0.2):
-    num_edges = edge_index.size(1)
-    mask = torch.rand(num_edges, device=edge_index.device) > drop_rate
-    return edge_index[:, mask]
-
-
-# =====================================================
-# TRAINER (PHEME + PAPER CONSISTENT)
-# =====================================================
 class BiGCNTrainer:
 
     def __init__(self, model, device="cuda", lr=5e-4, epochs=200, config=None):
@@ -25,32 +13,27 @@ class BiGCNTrainer:
         self.device = device
         self.epochs = epochs
 
-        bu_params = list(self.model.BU.parameters())
-        td_params = list(self.model.TD.parameters())
-
-        self.optimizer = torch.optim.Adam([
-            {'params': td_params},
-            {'params': bu_params, 'lr': lr / 5}
-        ], lr=lr, weight_decay=1e-4)
+        # ✅ SAME LR (paper-faithful)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=lr,
+            weight_decay=1e-4
+        )
 
         self.early_stop = True if config is None else config.get("early_stopping", True)
         self.patience = 10 if config is None else config.get("early_stopping_patience", 10)
 
-    # =====================================================
-    # TRAIN
-    # =====================================================
     def train(self, train_dataset, val_dataset, batch_size=64):
 
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
-        # ===== class weights (for imbalance) =====
+        # ===== class weights =====
         labels = [int(d.y.item()) for d in train_dataset]
         class_counts = np.bincount(labels)
         weights = 1.0 / (class_counts + 1e-6)
         weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
 
-        # ✅ Using CrossEntropy (no log_softmax in model)
         criterion = nn.CrossEntropyLoss(weight=weights)
 
         best_loss = float("inf")
@@ -67,14 +50,7 @@ class BiGCNTrainer:
 
                 data = data.to(self.device)
 
-                # ===== DropEdge (SAFE VERSION) =====
-                edge_index = drop_edge(data.edge_index, 0.2)
-                BU_edge_index = drop_edge(data.BU_edge_index, 0.2)
-
-                # temporarily assign (safe per batch)
-                data.edge_index = edge_index
-                data.BU_edge_index = BU_edge_index
-
+                # ✅ NO DropEdge here (handled in model)
                 out = self.model(data)
 
                 loss = criterion(out, data.y)
@@ -100,8 +76,6 @@ class BiGCNTrainer:
                 for data in val_loader:
 
                     data = data.to(self.device)
-
-                    # ❌ No DropEdge in validation
                     out = self.model(data)
 
                     loss = criterion(out, data.y)
@@ -136,9 +110,6 @@ class BiGCNTrainer:
         if best_state is not None:
             self.model.load_state_dict(best_state)
 
-    # =====================================================
-    # PREDICT
-    # =====================================================
     def predict(self, dataset, batch_size=64):
 
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)

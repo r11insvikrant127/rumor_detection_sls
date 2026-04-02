@@ -36,7 +36,8 @@ from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
 from src.preprocessing import TreeBuilderRvNN
-
+from torch_geometric.data import Data
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from sklearn.svm import LinearSVC
 from sklearn.preprocessing import StandardScaler
@@ -82,7 +83,62 @@ def print_full_table3(all_results):
         print(f"{method:<12} {'N':<5} {acc:<8.4f} {prec_n:<8.4f} {rec_n:<8.4f} {f1_n:<8.4f}")
         print(f"{'':<12} {'R':<5} {'':<8} {prec_r:<8.4f} {rec_r:<8.4f} {f1_r:<8.4f}")
 
+# =====================================================
+# 🔧 ADD build_graph HERE
+# =====================================================
+def build_graph(data, vectorizer):
 
+    tweets = [data["source"]] + data.get("replies", []) + data.get("retweets", [])
+
+    if len(tweets) < 2:
+        return None
+
+    id2idx = {}
+    texts = []
+
+    for i, tweet in enumerate(tweets):
+        id2idx[tweet["id"]] = i
+        texts.append(tweet["text"])
+
+    x = vectorizer.transform(texts).toarray()
+    x = torch.tensor(x, dtype=torch.float)
+
+    root_id = data["source"]["id"]
+    root_index = id2idx[root_id]
+
+    edges = []
+
+    for tweet in tweets:
+        parent = tweet.get("in_reply_to_status_id")
+        child = tweet["id"]
+
+        if parent is not None and parent in id2idx:
+            edges.append([id2idx[parent], id2idx[child]])
+        else:
+            if child != root_id:
+                edges.append([root_index, id2idx[child]])
+
+    if len(edges) == 0:
+        edge_index = torch.empty((2, 0), dtype=torch.long)
+    else:
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+
+    BU_edge_index = edge_index.flip(0)
+
+    label = data["label"]
+    if isinstance(label, str):
+        label = {"non-rumor": 0, "rumor": 1}[label]
+
+    y = torch.tensor([label], dtype=torch.long)
+
+    return Data(
+        x=x,
+        edge_index=edge_index,
+        BU_edge_index=BU_edge_index,
+        y=y,
+        rootindex=torch.tensor([root_index])
+    )
+    
 # =====================================================
 # TRAINER
 # =====================================================
@@ -179,41 +235,8 @@ class RumorDetectionTrainer:
         graph_cache_rvnn = []
 
         # ---- BiGCN ----
-        print("🔄 Loading BiGCN dataset...")
-
-        graph_cache_bigcn = torch.load(
-            os.path.join(project_root, "pheme_bigcn_dataset.pt")
-        )
-
-        print(f"BiGCN graphs: {len(graph_cache_bigcn)}, Events: {len(events)}")
-
-        print("✅ BiGCN dataset loaded")
-        # 🔥 VALID INDICES FOR BiGCN (DO NOT TOUCH SLS DATA)
-        valid_bigcn_indices = []
-
-        for i, event in enumerate(events):
-
-            tweets = event["tweets"]
-
-            if len(tweets) < 3:
-                continue
-
-            tweet_ids = set(str(t["id"]) for t in tweets)
-
-            has_edge = False
-            for t in tweets:
-                parent = t.get("in_reply_to_status_id")
-                if parent is not None and str(parent) in tweet_ids:
-                    has_edge = True
-                    break
-
-            if has_edge:
-                valid_bigcn_indices.append(i)
-
-        # mapping original index → graph index
-        index_map = {orig_i: new_i for new_i, orig_i in enumerate(valid_bigcn_indices)}
-
-        print(f"✅ BiGCN usable events: {len(valid_bigcn_indices)}")
+       
+        
 
         for event in events:
             
@@ -234,7 +257,51 @@ class RumorDetectionTrainer:
             X_train_raw, X_val_raw = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
 
+            # =========================
+            # BiGCN GRAPH BUILD (FIXED)
+            # =========================
 
+            train_events = [events[i] for i in train_idx]
+            val_events   = [events[i] for i in val_idx]
+
+            # ---- TF-IDF (NO LEAKAGE) ----
+            train_texts = []
+            for event in train_events:
+                tweets = [event["source"]] + event.get("replies", []) + event.get("retweets", [])
+                for t in tweets:
+                    train_texts.append(t["text"])
+
+            vectorizer = TfidfVectorizer(max_features=5000)
+            vectorizer.fit(train_texts)
+
+            # ---- BUILD GRAPHS ----
+            graphs_train_bigcn = []
+            graphs_val_bigcn = []
+
+            for event in train_events:
+                g = build_graph(event, vectorizer)
+                if g is not None:
+                    graphs_train_bigcn.append(g)
+
+            for event in val_events:
+                g = build_graph(event, vectorizer)
+                if g is not None:
+                    graphs_val_bigcn.append(g)
+
+            print(f"BiGCN graphs: {len(graphs_train_bigcn)} train | {len(graphs_val_bigcn)} val")
+            
+            # =========================
+            # BiGCN SAFE CHECK (FIXED)
+            # =========================
+            skip_bigcn = False
+
+            if len(graphs_train_bigcn) == 0 or len(graphs_val_bigcn) == 0:
+                print("⚠️ Skipping BiGCN for this fold (empty graphs)")
+                skip_bigcn = True
+            else:
+                in_dim = graphs_train_bigcn[0].x.shape[1]
+                print(f"🔧 BiGCN input dim: {in_dim}")
+                
             # Normalize
             normalizer = FeatureNormalizer()
             X_train = normalizer.fit_transform(X_train_raw.copy(), self.feature_names)
@@ -278,21 +345,6 @@ class RumorDetectionTrainer:
             # =====================================================
             # TRAIN DEEP MODELS (BiGCN, RvNN, PPC)
             # =====================================================
-            # ---- BiGCN ----
-            # 🔥 FILTER ONLY VALID BiGCN SAMPLES
-            train_idx_bigcn = [i for i in train_idx if i in valid_bigcn_indices]
-            val_idx_bigcn = [i for i in val_idx if i in valid_bigcn_indices]
-
-            graphs_train_bigcn = [graph_cache_bigcn[index_map[i]] for i in train_idx_bigcn]
-            graphs_val_bigcn = [graph_cache_bigcn[index_map[i]] for i in val_idx_bigcn]
-            
-            # 🔥 SAFETY CHECK (ADD HERE)
-            if len(graphs_train_bigcn) == 0:
-                continue
-            # 🔧 Input dimension directly from PyG Data
-            in_dim = graphs_train_bigcn[0].x.shape[1]
-
-            print(f"🔧 BiGCN input dim: {in_dim}")
 
             # ---- PPC / RvNN ----
             events_train_ppc = [events[i] for i in train_idx]
@@ -302,14 +354,24 @@ class RumorDetectionTrainer:
             
 
             # ---- BiGCN ----
-            bigcn_trainer = BiGCNTrainer(
-                BiGCN(in_dim=in_dim),
-                device=self.device,
-                config=self.config.training.__dict__
-            )
+            if not skip_bigcn:
+                bigcn_trainer = BiGCNTrainer(
+                    BiGCN(in_dim=in_dim),
+                    device=self.device,
+                    config=self.config.training.__dict__
+                )
 
-            bigcn_trainer.train(graphs_train_bigcn, graphs_val_bigcn)
-            preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
+                bigcn_trainer.train(graphs_train_bigcn, graphs_val_bigcn)
+                preds_bigcn = bigcn_trainer.predict(graphs_val_bigcn)
+
+                # ===== FIX LABEL ALIGNMENT =====
+                y_val_bigcn = np.array([d.y.item() for d in graphs_val_bigcn])
+
+                all_model_results["BiGCN"].append(
+                    Evaluator.compute_metrics(y_val_bigcn, preds_bigcn)
+                )
+            else:
+                print("⚠️ BiGCN skipped for this fold")
 
             # ---- RvNN ----
 
@@ -333,8 +395,9 @@ class RumorDetectionTrainer:
             assert len(y_val) == len(preds_ppc)
 
             # ---- store metrics ----
-            # 🔴 FIX: align labels with filtered BiGCN indices
-            y_val_bigcn = y[val_idx_bigcn]
+            
+            # ===== FIX LABEL ALIGNMENT =====
+            y_val_bigcn = np.array([d.y.item() for d in graphs_val_bigcn])
 
             all_model_results["BiGCN"].append(
                 Evaluator.compute_metrics(y_val_bigcn, preds_bigcn)
