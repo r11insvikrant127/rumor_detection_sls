@@ -35,6 +35,8 @@ class TDrumorGCN(nn.Module):
         H1 = F.relu(H1)
 
         root_extend = torch.zeros_like(x0)
+        ptr = data.ptr
+
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
@@ -49,6 +51,8 @@ class TDrumorGCN(nn.Module):
         H2 = F.relu(H2)
 
         root_extend = torch.zeros_like(H2)
+        ptr = data.ptr
+
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
@@ -84,6 +88,8 @@ class BUrumorGCN(nn.Module):
         H1 = F.relu(H1)
 
         root_extend = torch.zeros_like(x0)
+        ptr = data.ptr
+
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
@@ -98,6 +104,8 @@ class BUrumorGCN(nn.Module):
         H2 = F.relu(H2)
 
         root_extend = torch.zeros_like(H2)
+        ptr = data.ptr
+
         for b in range(batch.max().item() + 1):
             start = ptr[b]
             root = rootindex[b].item() + start
