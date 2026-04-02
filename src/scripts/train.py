@@ -32,7 +32,6 @@ from sklearn.svm import SVC
 from src.models.bigcn import BiGCN
 from src.models.rvnn import RvNN
 from src.models.ppc import PPC
-from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
 from src.training.bigcn_trainer import BiGCNTrainer
 from src.training.rvnn_trainer import RvNNTrainer
 from src.training.ppc_trainer import PPCTrainer
@@ -128,11 +127,11 @@ class RumorDetectionTrainer:
             if "source" not in event or event["source"] is None:
                 continue
 
-            tweets = [event["source"]]
-            if "replies" in event:
-                tweets.extend(event["replies"])
-
-            event["tweets"] = tweets
+            if "tweets" not in event:
+                tweets = [event["source"]]
+                if "replies" in event:
+                    tweets.extend(event["replies"])
+                event["tweets"] = tweets
             event["source_id"] = str(event["source"]["id"])
 
             feat = self.feature_extractor.extract_features(event)
@@ -173,11 +172,7 @@ class RumorDetectionTrainer:
         # =========================
         # GRAPH CACHING
         # =========================
-        print("🔄 Building graph caches...")
-
-        # ---- PPC ----
-        tree_builder_ppc = TreeBuilderPPC()
-        graph_cache_ppc = []
+        print("🔄 Building Rvnn graph caches...")
 
         # ---- RvNN ----
         tree_builder_rvnn = TreeBuilderRvNN()
@@ -221,13 +216,6 @@ class RumorDetectionTrainer:
         print(f"✅ BiGCN usable events: {len(valid_bigcn_indices)}")
 
         for event in events:
-
-            # PPC graph
-            graph_ppc = tree_builder_ppc.build_from_tweets(
-                tweets=event["tweets"],
-                source_id=event["source_id"]
-            )
-            graph_cache_ppc.append(graph_ppc)
             
             # RvNN graph (WITH TEXT)
             file_path = Path(project_root) / event["file_path"]
@@ -307,8 +295,8 @@ class RumorDetectionTrainer:
             print(f"🔧 BiGCN input dim: {in_dim}")
 
             # ---- PPC / RvNN ----
-            graphs_train_ppc = [graph_cache_ppc[i] for i in train_idx]
-            graphs_val_ppc = [graph_cache_ppc[i] for i in val_idx]
+            events_train_ppc = [events[i] for i in train_idx]
+            events_val_ppc = [events[i] for i in val_idx]
             graphs_train_rvnn = [graph_cache_rvnn[i] for i in train_idx]
             graphs_val_rvnn = [graph_cache_rvnn[i] for i in val_idx]
             
@@ -338,10 +326,11 @@ class RumorDetectionTrainer:
                 device=self.device,
                 config=self.config.training.__dict__
             )
-            ppc_trainer.train(graphs_train_ppc, y_train, graphs_val_ppc, y_val)
-            preds_ppc = ppc_trainer.predict(graphs_val_ppc)
+            ppc_trainer.train(events_train_ppc, y_train, events_val_ppc, y_val)
+            preds_ppc = ppc_trainer.predict(events_val_ppc)
             
             print("PPC check:", len(y_val), len(preds_ppc))
+            assert len(y_val) == len(preds_ppc)
 
             # ---- store metrics ----
             # 🔴 FIX: align labels with filtered BiGCN indices

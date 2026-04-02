@@ -2,80 +2,58 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from src.preprocessing.tree_builder_ppc import TreeBuilderPPC
+from src.preprocessing.tree_builder_ppc import PPCPreprocessor
 
 
 class PPCTrainer:
 
-    def __init__(self, model, device="cuda", lr=1e-3, epochs=20, config=None):
+    def __init__(self, model, device="cuda", lr=1e-3, epochs=200, config=None):
+
         self.model = model.to(device)
         self.device = device
         self.epochs = epochs
 
-        self.criterion = None
         self.optimizer = torch.optim.Adadelta(self.model.parameters())
 
-        self.tree_builder = TreeBuilderPPC()
-
-        self.max_len = 40
-
-        self.early_stop = True if config is None else config.get("early_stopping", True)
-        self.patience = 5 if config is None else config.get("early_stopping_patience", 5)
+        self.preprocessor = PPCPreprocessor(max_len=40)
 
         self.batch_size = 32
 
+        self.early_stop = True if config is None else config.get("early_stopping", True)
+        self.patience = 10 if config is None else config.get("early_stopping_patience", 10)
+
+        self.criterion = None
+
     # ==================================================
-    # BUILD SEQUENCE
+    # BUILD SEQUENCE (DIRECT FROM PHEME JSON)
     # ==================================================
-    def build_sequence(self, graph):
+    def build_sequence(self, data):
+        seq = self.preprocessor.process_thread(data)
 
-        nodes = sorted(
-            graph.nodes(data=True),
-            key=lambda x: x[1].get("time", 0)
-        )
+        if seq is None:
+            return np.zeros((40, 8), dtype=np.float32)
 
-        features = []
+        # -------- NORMALIZATION (OPTIONAL BUT GOOD) --------
+        seq[:, 2] = np.log1p(seq[:, 2])   # followers
+        seq[:, 3] = np.log1p(seq[:, 3])   # friends
+        seq[:, 4] = np.log1p(seq[:, 4])   # statuses
 
-        for _, attr in nodes:
-            feat = attr.get("features", None)
+        seq[:, 5] = seq[:, 5] / 3650.0    # reg age (~10 yrs)
+        seq[:, 0] = seq[:, 0] / 100.0     # description length
+        seq[:, 1] = seq[:, 1] / 50.0      # username length
 
-            if feat is not None and len(feat) == 8:
-                features.append(feat)
-
-        if len(features) == 0:
-            return np.zeros((self.max_len, 8), dtype=np.float32)
-
-        features = np.array(features, dtype=np.float32)
-        
-        # -------- TRUNCATE / OVERSAMPLE --------
-        if len(features) >= self.max_len:
-            features = features[:self.max_len]
-        else:
-            pad_len = self.max_len - len(features)
-
-            # 🔴 safer sampling
-            indices = np.random.randint(0, len(features), size=pad_len)
-            extra = features[indices]
-
-            features = np.concatenate([features, extra], axis=0)
-            
-        # -------- NORMALIZATION --------
-        features[:, 0:3] = np.log1p(features[:, 0:3])   # followers, friends, statuses
-        features[:, 3] = features[:, 3] / 3650.0        # reg age (~10 yrs)
-        features[:, 5] = features[:, 5] / 100.0         # description length
-        features[:, 6] = features[:, 6] / 50.0          # username length
-
-        return features
+        return seq
 
     # ==================================================
     # TRAIN
     # ==================================================
     def train(self, events_train, labels_train, events_val, labels_val):
 
-        class_counts = np.bincount(labels_train)
+        # -------- CLASS WEIGHTS --------
+        class_counts = np.bincount(labels_train, minlength=2)
         weights = class_counts.sum() / (len(class_counts) * class_counts)
-
         weights = torch.tensor(weights, dtype=torch.float32).to(self.device)
+
         self.criterion = nn.CrossEntropyLoss(weight=weights)
 
         print("PPC Class counts:", class_counts)
@@ -87,6 +65,7 @@ class PPCTrainer:
 
         for epoch in range(self.epochs):
 
+            # -------- SHUFFLE --------
             perm = np.random.permutation(len(events_train))
             events_train = [events_train[i] for i in perm]
             labels_train = labels_train[perm]
@@ -94,13 +73,14 @@ class PPCTrainer:
             self.model.train()
             total_loss = 0
 
+            # -------- TRAIN LOOP --------
             for i in range(0, len(events_train), self.batch_size):
 
-                batch_graphs = events_train[i:i+self.batch_size]
+                batch_data = events_train[i:i+self.batch_size]
                 batch_labels = labels_train[i:i+self.batch_size]
 
                 batch_features = [
-                    self.build_sequence(graph) for graph in batch_graphs
+                    self.build_sequence(data) for data in batch_data
                 ]
 
                 x = torch.from_numpy(np.array(batch_features)).float().to(self.device)
@@ -124,11 +104,11 @@ class PPCTrainer:
             with torch.no_grad():
                 for i in range(0, len(events_val), self.batch_size):
 
-                    batch_graphs = events_val[i:i+self.batch_size]
+                    batch_data = events_val[i:i+self.batch_size]
                     batch_labels = labels_val[i:i+self.batch_size]
 
                     batch_features = [
-                        self.build_sequence(graph) for graph in batch_graphs
+                        self.build_sequence(data) for data in batch_data
                     ]
 
                     x = torch.from_numpy(np.array(batch_features)).float().to(self.device)
@@ -169,10 +149,10 @@ class PPCTrainer:
         with torch.no_grad():
             for i in range(0, len(events), self.batch_size):
 
-                batch_graphs = events[i:i+self.batch_size]
+                batch_data = events[i:i+self.batch_size]
 
                 batch_features = [
-                    self.build_sequence(graph) for graph in batch_graphs
+                    self.build_sequence(data) for data in batch_data
                 ]
 
                 x = torch.from_numpy(np.array(batch_features)).float().to(self.device)

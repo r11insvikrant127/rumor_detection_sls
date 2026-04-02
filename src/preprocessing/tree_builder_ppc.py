@@ -1,115 +1,86 @@
-import networkx as nx
-from typing import List, Dict
+import random
 from datetime import datetime
+import numpy as np
 
 
-class TreeBuilderPPC:
+class PPCPreprocessor:
+    def __init__(self, max_len=40):
+        self.max_len = max_len  # paper uses ~30–40
 
-    def __init__(self):
-        self.graph = nx.DiGraph()
-
-    # --------------------------------------------------
-    # UTILITIES
-    # --------------------------------------------------
-    def _normalize_id(self, tid) -> str:
-        if tid is None:
-            return ""
-        return str(tid).strip()
-
+    # --------------------------------------------
+    # TIME PARSER (FIXED FOR TWITTER FORMAT)
+    # --------------------------------------------
     def _parse_time(self, t):
         if t is None:
             return None
-        if isinstance(t, datetime):
-            return t
         try:
-            return datetime.fromisoformat(str(t).replace("Z", "+00:00"))
+            return datetime.strptime(t, "%a %b %d %H:%M:%S %z %Y")
         except Exception:
             return None
 
-    # --------------------------------------------------
-    # USER FEATURE EXTRACTION (PPC CORE)
-    # --------------------------------------------------
-    def _extract_user_features(self, tweet):
-
+    # --------------------------------------------
+    # USER FEATURE EXTRACTION (8 FEATURES)
+    # --------------------------------------------
+    def _extract_user_features(self, tweet, source_time):
         user = tweet.get("user", {})
 
-        created_at = self._parse_time(tweet.get("created_at"))
-        user_created = self._parse_time(user.get("created_at"))
+        tweet_time = self._parse_time(tweet.get("created_at"))
+        user_time = self._parse_time(user.get("created_at"))
 
-        if created_at and user_created:
-            reg_age = (created_at - user_created).total_seconds() / 86400.0
+        # registration age (in days)
+        if tweet_time and user_time:
+            reg_age = (tweet_time - user_time).total_seconds() / 86400.0
         else:
             reg_age = 0.0
 
         return [
-            user.get("followers_count", 0),
-            user.get("friends_count", 0),
-            user.get("statuses_count", 0),
-            reg_age,
-            int(user.get("verified", False)),
-            len((user.get("description") or "")),
-            len((user.get("screen_name") or "")),
-            int(user.get("geo_enabled", False)),
+            len(user.get("description") or ""),          # 1
+            len(user.get("screen_name") or ""),          # 2
+            user.get("followers_count", 0),              # 3
+            user.get("friends_count", 0),                # 4
+            user.get("statuses_count", 0),               # 5
+            reg_age,                                     # 6
+            int(user.get("verified", False)),            # 7
+            int(user.get("geo_enabled", False)),         # 8
         ]
 
-    # --------------------------------------------------
-    # MAIN BUILDER
-    # --------------------------------------------------
-    def build_from_tweets(
-        self,
-        tweets: List[Dict],
-        source_id: str,
-    ) -> nx.DiGraph:
+    # --------------------------------------------
+    # MAIN FUNCTION
+    # --------------------------------------------
+    def process_thread(self, data):
+        tweets = data.get("tweets", [])
 
-        self.graph.clear()
-        seen_ids = set()
+        # -------- Step 1: parse + filter --------
+        valid_tweets = []
+        for t in tweets:
+            t_time = self._parse_time(t.get("created_at"))
+            if t_time is not None:
+                valid_tweets.append((t, t_time))
+         # 🔥 DEBUG PRINT HERE
+        thread_id = data.get("thread_id", "unknown")
+        if len(valid_tweets) != len(tweets):
+            print(f"Mismatch in {thread_id}: {len(tweets)} -> {len(valid_tweets)}")
+        if len(valid_tweets) == 0:
+            print("All timestamps failed:", tweets[0].get("created_at"))
+            return None
 
-        source_id = self._normalize_id(source_id)
+        # -------- Step 2: sort by time --------
+        valid_tweets.sort(key=lambda x: x[1])
 
-        # ---------- FIND SOURCE TIME ----------
-        source_time = None
-        for tweet in tweets:
-            tid = self._normalize_id(tweet.get("id", tweet.get("tweet_id")))
-            if tid == source_id:
-                source_time = self._parse_time(tweet.get("created_at"))
-                break
+        # -------- Step 3: get source time --------
+        source_time = valid_tweets[0][1]
 
-        valid_times = [
-            self._parse_time(t.get("created_at"))
-            for t in tweets
-            if self._parse_time(t.get("created_at")) is not None
-        ]
+        # -------- Step 4: build sequence --------
+        sequence = []
+        for tweet, _ in valid_tweets:
+            features = self._extract_user_features(tweet, source_time)
+            sequence.append(features)
 
-        if source_time is None:
-            source_time = min(valid_times) if len(valid_times) > 0 else datetime.utcnow()
+        # -------- Step 5: fix length --------
+        if len(sequence) > self.max_len:
+            sequence = sequence[:self.max_len]
+        else:
+            while len(sequence) < self.max_len:
+                sequence.append(random.choice(sequence))
 
-        # ---------- ADD NODES ----------
-        for tweet in tweets:
-
-            tweet_id = self._normalize_id(
-                tweet.get("id", tweet.get("tweet_id"))
-            )
-
-            if not tweet_id or tweet_id in seen_ids:
-                continue
-
-            created_at = self._parse_time(tweet.get("created_at"))
-
-            # 🔴 IMPORTANT: skip invalid timestamps
-            if created_at is None:
-                continue
-
-            seen_ids.add(tweet_id)
-
-            # -------- RELATIVE TIME (minutes) --------
-            time_delta = (created_at - source_time).total_seconds() / 60.0
-
-            features = self._extract_user_features(tweet)
-
-            self.graph.add_node(
-                tweet_id,
-                time=float(time_delta),
-                features=features,
-            )
-
-        return self.graph
+        return np.array(sequence, dtype=np.float32)
