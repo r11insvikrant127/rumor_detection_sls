@@ -53,7 +53,7 @@ class TDrumorGCN(nn.Module):
         H2 = self.conv2(H1, edge_index)
         H2 = F.relu(H2)
 
-        root_extend = torch.zeros_like(H2)
+        root_extend = torch.zeros(H2.size(0), H1.size(1), device=H2.device)
         ptr = data.ptr
 
         for b in range(batch.max().item() + 1):
@@ -112,7 +112,7 @@ class BUrumorGCN(nn.Module):
         H2 = self.conv2(H1, edge_index)
         H2 = F.relu(H2)
 
-        root_extend = torch.zeros_like(H2)
+        root_extend = torch.zeros(H2.size(0), H1.size(1), device=H2.device)
         ptr = data.ptr
 
         for b in range(batch.max().item() + 1):
