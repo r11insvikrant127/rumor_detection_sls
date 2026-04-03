@@ -128,7 +128,7 @@ class PaperExactAblation:
         if len(X) == 0:
             raise ValueError("No features extracted. FeatureExtractor is failing for all events.")
 
-        X=np.nan_to_num(X)
+        X = np.nan_to_num(X, nan=0.0)
 
         print("Feature matrix shape:",X.shape)
 
@@ -195,7 +195,6 @@ class PaperExactAblation:
     # FIGURE 4
     # -------------------------------------------------------
 
-
     def compute_fig4(self):
 
         print("\nRunning Fig4 reproduction")
@@ -213,59 +212,81 @@ class PaperExactAblation:
 
             fold_probs = []
             fold_labels = []
+            fold_features_train = []
+            fold_features_val = []
+            fold_labels_train = []
 
+            # -----------------------------
+            # TRAIN SLS + STORE FOLD DATA
+            # -----------------------------
             for train_idx, val_idx in self.splits:
 
-                # ---- 1. Select subset FIRST ----
+                # 1. Select subset
                 X_train = self.X[train_idx][:, idx]
                 y_train = self.y[train_idx]
 
                 X_val = self.X[val_idx][:, idx]
                 y_val = self.y[val_idx]
 
-                # ---- 2. Get correct feature names ----
+                # 2. Feature names
                 selected_features = [self.feature_names[i] for i in idx]
-                
-                # ---- 3. Normalize per fold ----
+
+                # 3. Normalize
                 normalizer = FeatureNormalizer()
                 X_train = normalizer.fit_transform(X_train, selected_features)
                 X_val = normalizer.transform(X_val)
-            
-                # ---- 4. Train + predict ----
+
+                # 4. Train SLS
                 probs = self.train_sls(
                     X_train, y_train,
                     X_val, y_val,
                     len(idx)
                 )
 
+                # Store everything needed
                 fold_probs.append(probs)
-                fold_labels.append(y_val)   # ✅ FIXED indentation
+                fold_labels.append(y_val)
+                fold_features_train.append(X_train)
+                fold_features_val.append(X_val)
+                fold_labels_train.append(y_train)
 
+            # -----------------------------
+            # THRESHOLD LOOP
+            # -----------------------------
             threshold_acc = []
 
             for t in self.thresholds_fig4:
 
                 fold_acc = []
 
-                for probs, y_val in zip(fold_probs, fold_labels):
+                for probs, y_val, X_train, X_val, y_train in zip(
+                    fold_probs, fold_labels,
+                    fold_features_train, fold_features_val,
+                    fold_labels_train
+                ):
 
                     max_probs = np.max(probs, axis=1)
                     preds = np.argmax(probs, axis=1)
 
-                    confident = max_probs >= t
+                    # --- Train GBDT (same fold, same features) ---
+                    gbdt = GBDTWrapper(
+                        n_estimators=self.config.gbdt.n_estimators,
+                        learning_rate=self.config.gbdt.learning_rate,
+                        max_depth=self.config.gbdt.max_depth
+                    )
+                    gbdt.fit(X_train, y_train)
 
-                    if confident.sum() == 0:
-                        fold_acc.append(np.nan)
-                        continue
+                    # --- Apply switching ---
+                    uncertain = max_probs < t
 
-                    acc = (preds[confident] == y_val[confident]).mean()
+                    if uncertain.sum() > 0:
+                        preds[uncertain] = gbdt.predict(X_val[uncertain])
+
+                    acc = (preds == y_val).mean()
                     fold_acc.append(acc)
 
-                # ✅ Safe mean
-                if len(fold_acc) > 0:
-                    threshold_acc.append(np.nanmean(fold_acc))
-                else:
-                    threshold_acc.append(np.nan)
+                # Mean over folds
+                threshold_acc.append(np.nanmean(fold_acc))
 
             results[name] = threshold_acc
 
@@ -282,10 +303,6 @@ class PaperExactAblation:
         rows = []
 
         for train_idx, val_idx in self.splits:
-
-            # ---- 1. Get raw features (for GBDT) ----
-            X_train_raw = self.X_raw[train_idx]
-            X_val_raw = self.X_raw[val_idx]
 
             # ---- 2. Get SLS features ----
             X_train = self.X[train_idx]
@@ -312,8 +329,8 @@ class PaperExactAblation:
                 max_depth=self.config.gbdt.max_depth
             )
 
-            gbdt.fit(X_train_raw, y_train)
-            gbdt_preds = gbdt.predict(X_val_raw)
+            gbdt.fit(X_train, y_train)
+            gbdt_preds = gbdt.predict(X_val)
 
             # ---- 6. Threshold analysis ----
             for t in self.thresholds_fig5:
@@ -416,9 +433,7 @@ def main():
     events=study.load_pheme_data(args.data_dir)
 
     X,y=study.extract_features(events)
-    X_raw = X.copy()
-    study.X=X
-    study.X_raw = X_raw
+    study.X = X
     study.y=y
 
     study.setup_cv(X,y)
